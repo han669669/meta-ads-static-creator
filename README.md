@@ -29,8 +29,8 @@ Run `/brand` first to build the brand operating system before generating ads.
 ## What you need
 
 - **Claude Code** or **Claude Cowork** with this folder open, so Claude can run the scripts.
-- **Python 3**, then `pip install -r requirements.txt`.
-- A **fal.ai key** for image generation. Copy `.env.example` to `.env` and add your `FAL_KEY`. Generation is paid on your own fal account, and Claude shows you the cost and asks before every paid call.
+- **Python 3.10+**, then `pip install -r requirements.txt`.
+- An image key: a **fal.ai key** (`FAL_KEY`) **or** a **Replicate token** (`REPLICATE_API_TOKEN`, from [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens)). Copy `.env.example` to `.env` and add one. If both are present, fal is used unless you set `IMAGE_PROVIDER` or pass `--provider`. Generation is paid on your own account. Claude runs `--estimate`, shows the cost, and asks before every paid call.
 - **Paper** connected to Claude, for building the editable ad layers.
 - Recommended: **Claude in Chrome**, so `/brand` can read colours, fonts and your logo straight off your site.
 
@@ -38,7 +38,7 @@ Run `/brand` first to build the brand operating system before generating ads.
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # then add your FAL_KEY
+cp .env.example .env        # then add FAL_KEY and/or REPLICATE_API_TOKEN
 ```
 
 Open a Claude session in this folder and run:
@@ -73,6 +73,24 @@ Then drop a winning ad you want to recreate into `brands/[brand-name]/generation
 5. **Mobile preflight.** Safe zones, platform UI rails and minimum type sizes are checked for both 4:5 and 9:16.
 
 Copy and layout changes after that are free. Only a new photographic plate costs money.
+
+## Choosing a provider
+
+Both paths use **GPT Image 2.5 Sunburst**. fal is the default for existing setups that only have `FAL_KEY`.
+
+| | fal | Replicate |
+|---|---|---|
+| Env | `FAL_KEY` | `REPLICATE_API_TOKEN` |
+| Model | `openai/gpt-image-2.5/sunburst/{edit,text-to-image}` | `openai/gpt-image-2.5-sunburst` |
+| Default quality | `low` (final render: `--final` → `high`) | same |
+| Cost | token-based; `--estimate` cannot give an exact USD figure | per output image (input images free): low $0.012, medium $0.047, high $0.128 (checked 2026-10-06) |
+| 4:5 | native custom size 1229×1536 | generate 1152×1536, centre-crop to 1152×1440 |
+| Uploads | fal CDN (public by default) | private Files API, deleted after the run |
+| Spend cap | fal account controls | Replicate tokens cannot be spend-capped; use prepaid credit with auto-reload off |
+
+Provider resolution: `--provider` → `spec.json` `"provider"` → `IMAGE_PROVIDER` → whichever single key is set → fal.
+
+First-pass plates and edits generate at **low**. Pass `--final` (or `--quality high`) only for a last high-quality render.
 
 ## Layout
 
