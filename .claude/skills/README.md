@@ -1,6 +1,6 @@
 # Creative Stack: Static Ads, skill conventions
 
-Generate on-brand, editable static ads for your brand using Claude and the fal API.
+Generate on-brand, editable static ads for your brand using Claude and fal or Replicate.
 
 ---
 
@@ -56,7 +56,7 @@ Each skill lives in `.claude/skills/<name>/` with its `SKILL.md` and its scripts
 - Always open Claude Code from the project root
 - File names: lowercase, hyphens, no spaces. Example: `energy-gels-dark.png` not `Energy Gels Dark.png`
 - Output versioning: reruns always increment (`_v1`, `_v2`, `_v3`). Previous outputs are never overwritten
-- FAL key goes in `.env` at the project root: `FAL_KEY=your_key_here`
+- Image keys go in `.env` at the project root: `FAL_KEY` and/or `REPLICATE_API_TOKEN`. fal is the default when only `FAL_KEY` is set.
 - Generation scripts are invoked from the project root as `python3 .claude/skills/<skill>/<script>.py brands/[brand-name]/generation/<category>/[output-name]`
 
 ### Outputs vs references

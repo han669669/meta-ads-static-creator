@@ -8,7 +8,7 @@ It is not much of a codebase on purpose. The skills are the product; the brand's
 
 **Each skill describes itself. Nothing outside a skill keeps a list of skills.**
 
-- Every skill's `SKILL.md` frontmatter declares its `outputs:` and `inboxes:` (folders under `brands/<brand>/generation/`), `requires:` (hard needs like `FAL_KEY`), `optional:` (soft needs it degrades without), and a `version:`. Scaffolding, validation and the docs tables all derive from these declarations.
+- Every skill's `SKILL.md` frontmatter declares its `outputs:` and `inboxes:` (folders under `brands/<brand>/generation/`), `requires:` (hard needs like `FAL_KEY` or `REPLICATE_API_TOKEN`), `optional:` (soft needs it degrades without), and a `version:`. Scaffolding, validation and the docs tables all derive from these declarations.
 - **Skills create their own folders on first use** (`mkdir -p` for each declared path). `/brand`'s scaffold is a convenience, not a prerequisite.
 - Everything reads the brand intelligence `/brand` writes. The shapes of the `intelligence/` files are the system's internal API; change them only deliberately.
 - `python3 .claude/skills/brand/brand.py --validate` checks every declaration; `--docs` regenerates the skill tables between markers in `README.md` and this file.
@@ -36,11 +36,11 @@ It is not much of a codebase on purpose. The skills are the product; the brand's
 
 The generation skill reads the brand context and writes versioned output into `brands/[brand]/generation/`. The brand's **prompt modifier** (`visual-guidelines.md`) is what makes output look like the brand rather than like stock AI. Folder structure, version numbering and reference-image conventions are in `.claude/skills/README.md`.
 
-Generation costs real money through fal. The skill states the exact cost and gets explicit approval before any paid call. There is no free stub mode: without a `FAL_KEY` the image step stops with a clear message.
+Generation costs real money through fal or Replicate. The skill runs `--estimate`, states the provider, model, quality and cost, and gets explicit approval before any paid call. Quality defaults to low; a final high render is explicit (`--final`). There is no free stub mode: without `FAL_KEY` or `REPLICATE_API_TOKEN` the image step stops with a clear message.
 
 ## Guardrails (non-negotiable)
 
-1. **fal spends only behind an explicit gate.** Show the cost before the first network call and get a yes.
+1. **Image generation (fal or Replicate) spends only behind an explicit gate.** Show the provider, model, quality and cost (from `--estimate`) before the first network call and get a yes.
 2. Offers come from `intelligence/offers.md`; claims must be supportable by `brands/[brand]/intelligence/` content. Compliance rules in `brand-voice.md` are hard constraints, and no style or conversion rule may harden a health claim past what `intelligence/` supports. Truth outranks voice, which outranks everything else.
 3. Reference ads contribute format and structure only, never another brand's copy, product or likeness.
 

@@ -4,11 +4,11 @@ description: "Create reference-led static ads with editable copy: generate only 
 image_model: GPT Image 2.5 Sunburst
 group: Ads
 summary: Reference-led static ads with editable copy, paired mobile formats, and source-to-overlay approval gates
-version: 2.0.0
+version: 2.1.0
 outputs: [meta-ads-static-creator]
 inboxes:
   meta-ads-static-creator/ad-references: Ad references
-requires: [FAL_KEY]
+requires: [FAL_KEY | REPLICATE_API_TOKEN]
 optional: [intelligence/fonts/*.ttf — the brand's real typefaces; degrades to a described fallback face]
 metadata:
   author: "Joey Mulcahy"
@@ -30,10 +30,19 @@ edited after delivery. Create its declared inbox and output folders before use.
   **9:16** (1080×1920). Never crop one finished design into the other.
 - All claims, offers and product facts must be supported by
   `brands/<brand>/intelligence/`. Do not infer them from the reference.
-- Before any paid call, state the exact plates, call count, base cost and maximum
-  cost including one quality retry per failed plate. Get explicit approval.
-- Each failed plate may use one pre-authorised retry. If that fails too, show the
-  better source; do not spend again without fresh approval.
+- Before any paid call, run `generate-blank-ad.py … --estimate` for each plate
+  and state the provider, model, quality, exact plates, call count, base cost
+  and maximum cost including one quality retry per failed plate. Get explicit
+  approval. Replicate prices are per output image (input images free; checked
+  2026-10-06: low $0.012, medium $0.047, high $0.128). fal prices are
+  token-based approximations from the model page.
+- Quality defaults to **low** for first-pass plates, edits and revisions. Use
+  `--final` (or `--quality high`) only when the user asks for a final high
+  render. Do not silently generate at high.
+- Each failed plate may use one pre-authorised retry. A provider error that
+  reports *not billed* does not consume that retry. *Billing unknown* counts as
+  spent. If the retry fails too, show the better source; do not spend again
+  without fresh approval.
 - Do not generate merely to improve editable layout. Overlay iteration is free.
 
 ## 1. Read the brief and choose a route
@@ -59,6 +68,9 @@ and generous, unambiguous copy space.
 Write `brands/<brand>/generation/meta-ads-static-creator/<output-name>/spec.json` before
 generating. It contains the reference and product inputs, supported copy, both
 delivery variants, image zones, source prompt, format primitives and route.
+Optional: `"provider": "fal"|"replicate"` and `"quality": "low"|"medium"|"high"`
+(or the same keys under `provider_options`). Quality still defaults to low when
+omitted; `--quality` / `--final` on the CLI override the spec.
 
 Every photographic product plate needs two references:
 
@@ -99,11 +111,24 @@ wireframe screenshots with the run.
 
 ## 4. Generate only the photography
 
+Choose the provider before quoting cost: `--provider`, else `spec.json`
+`"provider"`, else `IMAGE_PROVIDER`, else whichever single key is set. fal stays
+the default when only `FAL_KEY` is set, and when both keys are set. Never switch
+provider after approval without a fresh quote.
+
 Use `generate-blank-ad.py` once for each ratio. The prompt names the exact image
 zone, crop, product/scale references and required clear space. Generate no ad copy,
 UI, rules, dots, labels or placeholder text; printed packaging is the only permitted
 text. End every prompt with: “Absolutely no typography anywhere except the printed
 product packaging.”
+
+Run `--estimate` first (no network, no key required). Default quality is `low`.
+Edits stay low unless the user asks for `--final` / `--quality high`. On Replicate,
+4:5 plates are generated at 1152×1536 and centre-cropped to 1152×1440; keep
+essential content out of the outer ~3% top and bottom when prompting. 9:16 is
+native at 1152×2048. That centre-crop is part of generation, not a Paper fix.
+
+Both providers send `quality` (`low`/`medium`/`high`) to GPT Image 2.5 Sunburst.
 
 If the reference includes a person, preserve composition, pose, crop and lighting,
 but prompt a different face, hair and styling. Keep the reference available when it
@@ -122,7 +147,8 @@ pack scale to the hand/body reference, not just to empty space.
 
 Measure visible—not frame—bounds. Reconcile text and image zones against the actual
 plate. A failed crop or insufficient copy space requires the one permitted source
-retry, not shrunken type or a Paper patch.
+retry, not shrunken type or a Paper patch. If Replicate reports the failed call as
+*not billed* (`failed` or `aborted`), that retry is still available.
 
 Present the selected desaturated 4:5 and 9:16 source plates, their product bounds
 and safe-zone results. Do not create any copy, UI, proof, offer or other editable
