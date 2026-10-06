@@ -1,6 +1,6 @@
 # Creative Stack: Static Ads
 
-**Joey Mulcahy** made this skill (https://joeymulcahy.com/). This repository contains the skill with his permission. You can get more information from Joey through his videos and his newsletter.
+**Joey Mulcahy** made this skill (https://joeymulcahy.com/). This repository contains the skill without his permission. You can get more information from Joey through his videos and his newsletter.
 
 Joey Mulcahy keeps all rights. This repository does not give an open-source license.
 
