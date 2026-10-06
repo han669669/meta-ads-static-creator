@@ -111,7 +111,7 @@ Both providers use **GPT Image 2.5 Sunburst**. Replicate is the default. The ski
 | Default quality | `low` (final render: `--final` → `high`) | same |
 | Cost | Cost is token-based. `--estimate` cannot give an exact USD figure. | Per output image (input images have no cost): low $0.012, medium $0.047, high $0.128 (checked 2026-10-06) |
 | 4:5 | native custom size 1229×1536 | Replicate makes 1152×1536, then a centre-crop to 1152×1440 |
-| Uploads | fal CDN (public by default) | Replicate uses a private Files API. Replicate deletes the files after the run. |
+| Uploads | fal CDN (public by default) | Replicate uses a private Files API. The skill deletes the uploaded files after the run. |
 | Spend cap | fal account controls | Refer to the caution below. |
 
 > [!CAUTION]
