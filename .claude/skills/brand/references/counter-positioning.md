@@ -140,7 +140,7 @@ tests to be encouraging.
 After scoring: if all five pass, confirm the position is ready for content
 infrastructure build-out. If one or two are partial, name what needs resolving
 before committing. If two or more fail, return to Phase 3 or 4 and reconstruct —
-do not paper over a weak position with content.
+do not hide a weak position with content.
 
 ---
 

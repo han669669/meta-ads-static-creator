@@ -38,6 +38,8 @@ The generation skill reads the brand context and writes versioned output into `b
 
 Generation costs real money through Replicate or fal. Replicate is the default when both keys are set, or when no key is set; fal is used when only `FAL_KEY` is set. The skill runs `--estimate`, states the provider, model, quality and cost, and gets explicit approval before any paid call. Quality defaults to low; a final high render is explicit (`--final`). There is no free stub mode: without `REPLICATE_API_TOKEN` or `FAL_KEY` the image step stops and asks for `REPLICATE_API_TOKEN` (recommended) or `FAL_KEY`.
 
+Editable overlays are HTML files for Open Design: one 1080×1350 page, one 1080×1920 page, and a side-by-side review board, produced by `layers-to-html.py` from `layers.json`. The skill drives Open Design only through MCP file tools (`create_project`, `create_artifact`, `write_file`, `get_file`, `list_files`, `search_files`, `get_artifact`, `get_project`). Never call `start_run`, `get_run`, or `cancel_run`. The `compose-text.py` PNG remains the exact-size delivery master. Open Design is optional (see the skill `optional:` field). Before the first Open Design write in a run, name the project and get a yes.
+
 ## Guardrails (non-negotiable)
 
 1. **Image generation (Replicate or fal) spends only behind an explicit gate.** Show the provider, model, quality and cost (from `--estimate`) before the first network call and get a yes.

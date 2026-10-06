@@ -14,7 +14,7 @@ metadata:
 
 # Brand Setup & Brand Operating System
 
-Created by Joey Mulcahy — https://joeymulcahy.com/. Published here with his permission.
+Created by Joey Mulcahy — https://joeymulcahy.com/. Published here without his permission.
 
 `/brand` builds and maintains a brand's **operating system** — the shared brain
 every other skill reads so anything generated is on-brand. It runs in two modes:

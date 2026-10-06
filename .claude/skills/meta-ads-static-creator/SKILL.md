@@ -4,12 +4,12 @@ description: "Create reference-led static ads with editable copy: generate only 
 image_model: GPT Image 2.5 Sunburst
 group: Ads
 summary: Reference-led static ads with editable copy, paired mobile formats, and source-to-overlay approval gates
-version: 2.2.0
+version: 3.0.0
 outputs: [meta-ads-static-creator]
 inboxes:
   meta-ads-static-creator/ad-references: Ad references
 requires: [FAL_KEY | REPLICATE_API_TOKEN]
-optional: [intelligence/fonts/*.ttf — the brand's real typefaces; degrades to a described fallback face]
+optional: [intelligence/fonts/*.ttf — the brand's real typefaces; degrades to a described fallback face, Open Design desktop app + MCP]
 metadata:
   author: "Joey Mulcahy"
   source: "https://joeymulcahy.com/"
@@ -18,7 +18,7 @@ metadata:
 
 # Static Ads — editable text layer
 
-Created by Joey Mulcahy — https://joeymulcahy.com/. Published here with his permission.
+Created by Joey Mulcahy — https://joeymulcahy.com/. Published here without his permission.
 
 Build an ad from two independent parts: a text-free photographic plate and an
 editable layout. Use this skill when the copy needs to be localised, tested or
@@ -44,6 +44,12 @@ edited after delivery. Create its declared inbox and output folders before use.
   spent. If the retry fails too, show the better source; do not spend again
   without fresh approval.
 - Do not generate merely to improve editable layout. Overlay iteration is free.
+- Drive Open Design only through its MCP file tools. Never call `start_run`,
+  `get_run` or `cancel_run`: those launch Open Design's own agent (Claude Code
+  with `bypassPermissions`) and can spend OpenDesign Cloud credits.
+- Before the first Open Design write in a run, name the project and the files
+  you will write, then get explicit approval. Do not call `create_project`,
+  `create_artifact` or `write_file` until that yes.
 
 ## 1. Read the brief and choose a route
 
@@ -56,9 +62,9 @@ generic campaign copy.
 
 Use **layout-first** for three or more text groups, offers, comparisons, statistics,
 annotated images or precise editorial hierarchy. Build the complete editable
-wireframe first; photography only fills named image zones. Decide before generation
-whether each image zone is a deliberate panel or a seamless bleed, and preserve that
-treatment through the run.
+wireframe first in Open Design HTML; photography only fills named image zones.
+Decide before generation whether each image zone is a deliberate panel or a
+seamless bleed, and preserve that treatment through the run.
 
 Use **plate-first** only for a simple image-led composition with one short headline
 and generous, unambiguous copy space.
@@ -95,19 +101,53 @@ mix ingredients with founder facts, serving counts, offers or unrelated claims.
 
 ## 3. Build the wireframe before photography
 
-Make one wireframe per ratio using the real copy and component systems. It must work
-with images hidden: hierarchy, lanes, UI, proof and CTA remain clear and editable.
-Build one correct repeated component and duplicate it; vary content and placement,
-not type, padding, box size or line style unless the reference specifically calls
-for it.
+Open Design is HTML-file based. There are no artboards. Make one fixed-size HTML
+page per ratio: **4:5 = 1080×1350**, **9:16 = 1080×1920**. Run
+`layers-to-html.py … --variant … --wireframe` from the spec (or write the same
+shape through MCP file tools). Each image zone is a placeholder box. Add the
+`od-hide-images` class so the layout still works with images hidden: hierarchy,
+lanes, UI, proof and CTA remain clear and editable.
 
-Review repeated components side by side. Equal roles must share their declared
-system and align to intentional lanes or anchors—not convenient empty pixels. For
-leader lines, use short, non-crossing routes to distinct anchors. Keep labels,
-leaders and containers clear of faces, product labels and critical copy.
+Build one correct repeated component as a shared CSS class (`od-sys-<name>`);
+vary content and placement, not type, padding, box size or line style unless the
+reference specifically calls for it. One HTML element per layer, with a stable
+`data-od-id` and a readable `data-od-name`.
 
-Do not put photography into the wireframe until it passes this review. Save the
-wireframe screenshots with the run.
+Review repeated components side by side (the review-board HTML, or both pages
+in Open Design). Equal roles must share their declared system and align to
+intentional lanes or anchors—not convenient empty pixels. For leader lines, use
+short, non-crossing routes to distinct anchors. Keep labels, leaders and
+containers clear of faces, product labels and critical copy.
+
+Do not put photography into the wireframe until it passes this review. Open
+Design has no screenshot tool. Give the user the `previewUrl` from `get_project`
+and keep the local HTML with the run.
+
+### Open Design MCP (file tools only)
+
+Run mode: the user's Open Design **macOS desktop app**, with their own keys. Do
+not sign in to OpenDesign Cloud. The desktop app (the daemon) must be open.
+Docs in this skill were checked against **Open Design v0.24.1**; MCP tool names
+below were read from `apps/daemon/src/mcp.ts` on 2026-10-06.
+
+Use only these tools (parameter names as the live MCP schema shows them):
+
+- `create_project` (`name`, optional `id`) — once per run, after the write gate
+- `create_artifact` (`name`, `content`, optional `encoding` `utf8`|`base64`) —
+  first write of each HTML entry file
+- `write_file` (`path`, `content`, optional `encoding`) — fonts, plate PNGs,
+  later HTML overwrites (`encoding=base64` for binary)
+- `get_file` / `get_artifact` / `list_files` / `search_files` — read back
+  after the user edits in Open Design Edit mode
+- `get_project` — `previewUrl` for the user to review
+- `list_projects` / `get_active_context` — find the project if needed
+
+Never call `start_run`, `get_run`, `cancel_run`, `collect_brief`,
+`confirm_brief`, or the Cloud sign-in tools. Do not import a folder and do not
+call the daemon HTTP API. Copy `intelligence/fonts/*` into the Open Design
+project and load them with CSS `@font-face` (relative `od-fonts/` URLs from
+`layers-to-html.py`). If a brand face file is missing, disclose the editable
+fallback and use the embedded-font SVG as the exact visual source.
 
 ## 4. Generate only the photography
 
@@ -127,7 +167,7 @@ Run `--estimate` first (no network, no key required). Default quality is `low`.
 Edits stay low unless the user asks for `--final` / `--quality high`. On Replicate,
 4:5 plates are generated at 1152×1536 and centre-cropped to 1152×1440; keep
 essential content out of the outer ~3% top and bottom when prompting. 9:16 is
-native at 1152×2048. That centre-crop is part of generation, not a Paper fix.
+native at 1152×2048. That centre-crop is part of generation, not a design-tool fix.
 
 Both providers send `quality` (`low`/`medium`/`high`) to GPT Image 2.5 Sunburst.
 
@@ -148,7 +188,7 @@ pack scale to the hand/body reference, not just to empty space.
 
 Measure visible—not frame—bounds. Reconcile text and image zones against the actual
 plate. A failed crop or insufficient copy space requires the one permitted source
-retry, not shrunken type or a Paper patch. If Replicate reports the failed call as
+retry, not shrunken type or an overlay patch. If Replicate reports the failed call as
 *not billed* (`failed` or `aborted`), that retry is still available.
 
 Present the selected desaturated 4:5 and 9:16 source plates, their product bounds
@@ -167,8 +207,9 @@ overlay until the user approves the applicable source plate.
   reducing below these floors.
 
 Never fix a 9:16 safe-zone failure by tiling, extending, offsetting or boxing a
-finished plate in Paper. Re-render the source with approval; Paper may only crop
-inside an already seamless approved image zone.
+finished plate in the Open Design HTML. Re-render the source with approval. Crop
+inside an already seamless approved image zone only, with CSS `object-fit` /
+`object-position` (or the equivalent on the HTML image zone).
 
 ## 6. Compose editable overlays
 
@@ -176,35 +217,51 @@ Run `compose-text.py` once per approved variant. It outputs a flattened PNG, an
 embedded-font editable SVG and `layers.json` with rendered line bounds and baselines.
 Treat a shrink warning or a mobile-floor export block as a layout failure.
 
-For Paper/Figma/SVG handoff, every text, UI, proof, rule, button and legal element is
-its own editable layer. Use rendered line bounds and baselines to place text; do not
-blindly copy a raster compositor's coordinates. Preserve separate lanes for prices,
-labels and other independent elements.
+Then run `layers-to-html.py` once per variant (and `--board` for the side-by-side
+review file). It scales `layers.json` from plate pixels (for example 1152 wide)
+to 1080-wide delivery: **4:5 = 1080×1350**, **9:16 = 1080×1920**. Crop inside an
+approved image zone is CSS `object-fit` / `object-position`. Repeated components
+share one CSS class.
 
-In Paper, look up the font before styling. If the brand face is unavailable, disclose
-the editable fallback and use the embedded-font SVG as the exact visual source; ask
-before installing a licensed font. Create one correct repeated component, duplicate
-it, then audit font size, leading, tracking, box dimensions, padding, rule weight
-and alignment across all instances.
+For Open Design/SVG handoff, every text, UI, proof, rule, button and legal element
+is its own editable layer (one HTML element per layer, `data-od-id` + readable
+name). Use rendered line bounds and baselines to place text; do not blindly copy
+a raster compositor's coordinates. Preserve separate lanes for prices, labels and
+other independent elements.
+
+If the brand face file is missing from the Open Design project, disclose the
+editable fallback and use the embedded-font SVG as the exact visual source.
+Create one correct repeated component as a shared CSS class, then audit font
+size, leading, tracking, box dimensions, padding, rule weight and alignment
+across all instances.
+
+After the Open Design write gate, push the HTML, `od-fonts/` files and plate
+PNGs with `create_artifact` / `write_file`. The `compose-text.py` PNG is the
+exact-size delivery master. The user exports from Open Design only after hand
+edits.
 
 ## 7. Final preflight
 
-Review each ratio at actual delivery scale and beside the reference. The design is a
-draft, not a completed handoff, if any check fails:
+Review each ratio at actual delivery scale and beside the reference. Open Design
+has no screenshot tool and no artboards. Run `layers-to-html.py … --preflight`
+on the scaled layer bounds, then give the user the Open Design `previewUrl`.
+The design is a draft, not a completed handoff, if any check fails:
 
 - reference-specific primitives are present and editable;
 - repeated components read as one deliberate system;
 - text, lines and anchors are clean, aligned, unclipped and non-overlapping;
 - visible product bounds, 9:16 action rail and all live zones are clear;
 - the image treatment remains intentionally seamless or intentionally panelled;
-- mobile hierarchy and type floors pass independently for both ratios; and
-- paired artboards are adjacent and in reference order.
+- mobile hierarchy and type floors pass independently for both ratios at
+  1080-wide delivery size; and
+- the paired HTML pages (and the review board) are in reference order, 4:5
+  then 9:16.
 
-Take a final screenshot of each artboard and the full canvas, correct any failure,
-then re-review before calling the work complete.
+Correct any failure, then re-review before calling the work complete.
 
 ## 8. Deliver
 
-List both source plates, final PNGs, editable SVGs and `layers.json` files. State
-font fallbacks, intentional format omissions and any ratio-specific simplification.
-Offer free copy/layout iteration separately from a cost-approved source re-render.
+List both source plates, final PNGs, editable SVGs, `layers.json` files and the
+Open Design HTML files (each ratio plus the review board). State font fallbacks,
+intentional format omissions and any ratio-specific simplification. Offer free
+copy/layout iteration separately from a cost-approved source re-render.
