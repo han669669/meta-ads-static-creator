@@ -31,7 +31,8 @@ For an image-led 9:16 ad, keep the primary product or key product/use moment in 
 central product-safe stage: **x 120–810, y 430–1350**. This is intentionally
 stricter than the text live zone. Re-crop, translate or rescale the photography to
 satisfy it; the editable type grid is not a compensating mechanism. Verify this
-product-safe stage separately in the final Paper screenshot.
+product-safe stage separately in the Open Design preview (there is no screenshot
+tool).
 
 ## Mobile legibility gate
 

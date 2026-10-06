@@ -31,7 +31,7 @@ brands/
     generation/                    ← what the brand MAKES.
       meta-ads-static-creator/
         ad-references/                  ← inbox: drop winning-ad format refs here
-        [output-name]/                  spec.json · plates · final PNGs · editable SVGs · layers.json
+        [output-name]/                  spec.json · plates · final PNGs · editable SVGs · layers.json · Open Design HTML
 ```
 
 **`intelligence/visual-guidelines.md` is the brand-detection marker.** Its presence is what every downstream skill uses to recognise a real brand.

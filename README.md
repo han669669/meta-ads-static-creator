@@ -44,7 +44,7 @@ These items are necessary:
 - **Claude Code** or **Claude Cowork** is necessary. The Claude session uses this folder. Then Claude can start the scripts.
 - **Python 3.10+** (Python 3.10 or a subsequent version) is necessary. Type `pip install -r requirements.txt`.
 - An image key is necessary. The recommended key is a **Replicate** token (`REPLICATE_API_TOKEN`). You can get a Replicate token from [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens). A **fal.ai** key (`FAL_KEY`) is also valid. Copy `.env.example` to `.env`. Add one key. If you set both keys, the skill uses Replicate. If you set only `FAL_KEY`, the skill uses fal.
-- **Paper** (connected to Claude) is necessary. You use Paper to make the ad layers that you can change.
+- **Open Design** v0.24.1 is optional. You use Open Design to change the HTML ad layers. See [Open Design setup](#open-design-setup).
 - **Claude in Chrome** is not necessary, but it helps `/brand` read colors, fonts, and your logo from your site.
 
 > [!CAUTION]
@@ -91,10 +91,10 @@ Then type this command:
 ## How the skill makes a static ad
 
 1. **Read the reference.** Claude reads the reference ad. Claude finds the format devices (search bars, ratings, testimonial cards, labels, badges, proof). Claude writes copy from your brand files. Claude does not make offers or claims that are not in your brand files.
-2. **Wireframe first.** The skill makes a full layout that you can change for each ratio first. The layout uses copy from your brand files. The skill makes the layout before it makes any image.
+2. **Wireframe first.** The skill makes a full layout that you can change for each ratio first. The layout uses copy from your brand files. The skill makes the layout in Open Design as HTML. The skill makes the layout before it makes any image.
 3. **Make only the photography.** The skill makes one photographic plate with no text for each ratio. You approve the cost before the skill makes a paid call. You approve the plate before the skill adds copy.
-4. **Overlays that you can change.** The skill makes text and UI as separate layers in your brand fonts. The output is a flat PNG, an SVG that you can change, and a layer map. You use the layer map to make the ad in Paper.
-5. **Mobile preflight.** The skill does a check of safe zones, platform UI rails, and minimum type sizes. The skill does this check for 4:5 and for 9:16.
+4. **Overlays that you can change.** The skill makes text and UI as separate layers in your brand fonts. The output is a flat PNG, an SVG that you can change, a layer map, and HTML files. You use the layer map to make the ad in Open Design.
+5. **Mobile preflight.** The skill does a check of safe zones, platform UI rails, and minimum type sizes. The skill does this check for 4:5 and for 9:16. You review the Open Design preview.
 
 Changes to copy and to layout after this step have no cost. Only a new photographic plate has a cost.
 
@@ -128,6 +128,35 @@ The skill selects the provider in this order:
 If you set no key, add `REPLICATE_API_TOKEN` (recommended) or `FAL_KEY`.
 
 The skill makes first-pass plates and subsequent renders at **low**. Pass `--final` (or `--quality high`) only for a last high-quality render.
+
+<a id="open-design-setup"></a>
+
+## Open Design setup
+
+Open Design is optional. You use Open Design to change the HTML ad layers.
+
+This skill was tested against **Open Design v0.24.1**.
+
+Install the macOS desktop app from [github.com/nexu-io/open-design/releases](https://github.com/nexu-io/open-design/releases).
+
+Open the app. Use your own keys. Do not sign in to OpenDesign Cloud.
+
+In the app, select **Don't share** for analytics.
+
+> [!CAUTION]
+> Official builds still send one error-reporting channel. You cannot turn this channel off.
+
+Open **Settings → MCP server**. Copy the snippet for Claude. Paste the snippet into your Claude config.
+
+Do not use `curl | sh` to install the MCP server.
+
+On macOS, the `od` command can clash with `/usr/bin/od`. Use the Settings snippet. The snippet uses an absolute path.
+
+`od mcp install` changes the Claude config for all projects.
+
+Keep the Open Design app open while the skill writes files.
+
+The skill writes HTML through MCP file tools only. The skill does not call `start_run`.
 
 ## Layout
 
