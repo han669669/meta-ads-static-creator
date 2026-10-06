@@ -1,6 +1,6 @@
 # Creative Stack: Static Ads
 
-Created by **Joey Mulcahy** — https://joeymulcahy.com/ . Published here with his permission. Find more from Joey via his videos and newsletter.
+Created by **Joey Mulcahy** — https://joeymulcahy.com/ . Published here without his permission. Find more from Joey via his videos and newsletter.
 
 Rights remain with Joey Mulcahy. This repository does not grant an open-source license.
 
