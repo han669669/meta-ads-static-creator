@@ -36,11 +36,11 @@ It is not much of a codebase on purpose. The skills are the product; the brand's
 
 The generation skill reads the brand context and writes versioned output into `brands/[brand]/generation/`. The brand's **prompt modifier** (`visual-guidelines.md`) is what makes output look like the brand rather than like stock AI. Folder structure, version numbering and reference-image conventions are in `.claude/skills/README.md`.
 
-Generation costs real money through fal or Replicate. The skill runs `--estimate`, states the provider, model, quality and cost, and gets explicit approval before any paid call. Quality defaults to low; a final high render is explicit (`--final`). There is no free stub mode: without `FAL_KEY` or `REPLICATE_API_TOKEN` the image step stops with a clear message.
+Generation costs real money through Replicate or fal. Replicate is the default when both keys are set, or when no key is set; fal is used when only `FAL_KEY` is set. The skill runs `--estimate`, states the provider, model, quality and cost, and gets explicit approval before any paid call. Quality defaults to low; a final high render is explicit (`--final`). There is no free stub mode: without `REPLICATE_API_TOKEN` or `FAL_KEY` the image step stops and asks for `REPLICATE_API_TOKEN` (recommended) or `FAL_KEY`.
 
 ## Guardrails (non-negotiable)
 
-1. **Image generation (fal or Replicate) spends only behind an explicit gate.** Show the provider, model, quality and cost (from `--estimate`) before the first network call and get a yes.
+1. **Image generation (Replicate or fal) spends only behind an explicit gate.** Show the provider, model, quality and cost (from `--estimate`) before the first network call and get a yes.
 2. Offers come from `intelligence/offers.md`; claims must be supportable by `brands/[brand]/intelligence/` content. Compliance rules in `brand-voice.md` are hard constraints, and no style or conversion rule may harden a health claim past what `intelligence/` supports. Truth outranks voice, which outranks everything else.
 3. Reference ads contribute format and structure only, never another brand's copy, product or likeness.
 

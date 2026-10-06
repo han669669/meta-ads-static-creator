@@ -15,6 +15,9 @@ product images and the product scale reference; saves
 Quality defaults to low for first-pass plates and edits. --final (or
 --quality high) is the explicit high-quality final render.
 
+Replicate is the default provider when both keys are set, or when no key is
+set. fal is used when only FAL_KEY is set.
+
 --estimate prints the provider, model, quality, payload and cost and exits
 WITHOUT any network call (use it for the cost gate). --resume fetches an
 existing Replicate prediction instead of paying for a new one. Without
@@ -220,7 +223,15 @@ def main():
         )
         return
     if not os.environ.get(ENV_KEYS[provider]):
-        sys.exit(f"Error: {ENV_KEYS[provider]} not found. Add it to .env at the project root.")
+        have_any = any(os.environ.get(ENV_KEYS[p]) for p in ENV_KEYS)
+        if not have_any:
+            sys.exit(
+                "Error: no image key set. Add REPLICATE_API_TOKEN (recommended) "
+                "or FAL_KEY to .env at the project root."
+            )
+        sys.exit(
+            f"Error: {ENV_KEYS[provider]} not found. Add it to .env at the project root."
+        )
 
     try:
         res = mod.generate(req, plan, resume_id=_arg("--resume"))

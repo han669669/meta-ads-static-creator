@@ -43,7 +43,7 @@ These items are necessary:
 
 - **Claude Code** or **Claude Cowork** is necessary. The Claude session uses this folder. Then Claude can start the scripts.
 - **Python 3.10+** (Python 3.10 or a subsequent version) is necessary. Type `pip install -r requirements.txt`.
-- An image key is necessary. The key is a **fal.ai** key (`FAL_KEY`) or a **Replicate** token (`REPLICATE_API_TOKEN`). You can get a Replicate token from [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens). Copy `.env.example` to `.env`. Add one key. If you set both keys, the skill uses fal unless you set `IMAGE_PROVIDER` or pass `--provider`.
+- An image key is necessary. The recommended key is a **Replicate** token (`REPLICATE_API_TOKEN`). You can get a Replicate token from [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens). A **fal.ai** key (`FAL_KEY`) is also valid. Copy `.env.example` to `.env`. Add one key. If you set both keys, the skill uses Replicate. If you set only `FAL_KEY`, the skill uses fal.
 - **Paper** (connected to Claude) is necessary. You use Paper to make the ad layers that you can change.
 - **Claude in Chrome** is not necessary, but it helps `/brand` read colors, fonts, and your logo from your site.
 
@@ -56,7 +56,7 @@ Type these commands:
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # then add FAL_KEY and/or REPLICATE_API_TOKEN
+cp .env.example .env        # then add REPLICATE_API_TOKEN (recommended) and/or FAL_KEY
 ```
 
 Open a Claude session in this folder.
@@ -102,7 +102,7 @@ Changes to copy and to layout after this step have no cost. Only a new photograp
 
 ## Image providers
 
-Both providers use **GPT Image 2.5 Sunburst**. fal is the default when you set only `FAL_KEY`.
+Both providers use **GPT Image 2.5 Sunburst**. Replicate is the default. The skill uses fal when you set only `FAL_KEY`.
 
 | | fal | Replicate |
 |---|---|---|
@@ -123,7 +123,9 @@ The skill selects the provider in this order:
 2. `spec.json` `"provider"`
 3. `IMAGE_PROVIDER`
 4. The single key that you set
-5. fal.
+5. Replicate (both keys, or no key).
+
+If you set no key, add `REPLICATE_API_TOKEN` (recommended) or `FAL_KEY`.
 
 The skill makes first-pass plates and subsequent renders at **low**. Pass `--final` (or `--quality high`) only for a last high-quality render.
 

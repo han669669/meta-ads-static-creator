@@ -22,6 +22,7 @@ PROVIDERS = ("fal", "replicate")
 ENV_KEYS = {"fal": "FAL_KEY", "replicate": "REPLICATE_API_TOKEN"}
 QUALITIES = ("low", "medium", "high")
 DEFAULT_QUALITY = "low"
+DEFAULT_PROVIDER = "replicate"
 
 
 class ProviderError(RuntimeError):
@@ -79,8 +80,8 @@ def resolve_provider(cli: Optional[str], spec: Dict[str, Any]) -> Tuple[str, str
     """Pick the provider. Returns (provider, reason).
 
     Order: --provider > spec.json "provider" > IMAGE_PROVIDER env >
-    whichever single credential is present > "fal" (backwards compatible,
-    including when both keys are set).
+    whichever single credential is present > replicate (both keys set,
+    or neither). Users with only FAL_KEY still use fal.
     """
     for source, value in (
         ("--provider", cli),
@@ -102,8 +103,11 @@ def resolve_provider(cli: Optional[str], spec: Dict[str, Any]) -> Tuple[str, str
     if len(have) == 1:
         return have[0], f"only {ENV_KEYS[have[0]]} is set"
     if len(have) == 2:
-        return "fal", "both keys set; defaulting to fal (set IMAGE_PROVIDER to choose)"
-    return "fal", "no key set"
+        return (
+            DEFAULT_PROVIDER,
+            "both keys set; defaulting to replicate (set IMAGE_PROVIDER to choose)",
+        )
+    return DEFAULT_PROVIDER, "no key set"
 
 
 def resolve_quality(

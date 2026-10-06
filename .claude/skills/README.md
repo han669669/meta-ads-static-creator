@@ -56,7 +56,7 @@ Each skill lives in `.claude/skills/<name>/` with its `SKILL.md` and its scripts
 - Always open Claude Code from the project root
 - File names: lowercase, hyphens, no spaces. Example: `energy-gels-dark.png` not `Energy Gels Dark.png`
 - Output versioning: reruns always increment (`_v1`, `_v2`, `_v3`). Previous outputs are never overwritten
-- Image keys go in `.env` at the project root: `FAL_KEY` and/or `REPLICATE_API_TOKEN`. fal is the default when only `FAL_KEY` is set.
+- Image keys go in `.env` at the project root: `REPLICATE_API_TOKEN` (recommended) and/or `FAL_KEY`. Replicate is the default when both keys are set, or when no key is set. fal is used when only `FAL_KEY` is set.
 - Generation scripts are invoked from the project root as `python3 .claude/skills/<skill>/<script>.py brands/[brand-name]/generation/<category>/[output-name]`
 
 ### Outputs vs references
