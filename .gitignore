@@ -1,0 +1,11 @@
+# Generated creative is run output, not source. The scaffold survives a clone:
+# `**/` re-includes directories so git descends far enough to see the nested
+# .gitkeeps; a bare `!**/.gitkeep` under an excluded dir never fires.
+brands/*/generation/**
+!brands/*/generation/**/
+!brands/*/generation/**/.gitkeep
+
+.DS_Store
+.env
+.claude/settings.local.json
+__pycache__/
