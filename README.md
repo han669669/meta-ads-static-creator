@@ -1,55 +1,75 @@
 # Creative Stack: Static Ads
 
-Created by **Joey Mulcahy** — https://joeymulcahy.com/ . Published here without his permission. Find more from Joey via his videos and newsletter.
+**Joey Mulcahy** made this skill (https://joeymulcahy.com/). This repository contains the skill without his permission. You can get more information from Joey through his videos and his newsletter.
 
-Rights remain with Joey Mulcahy. This repository does not grant an open-source license.
+Joey Mulcahy keeps all rights. This repository does not give an open-source license.
 
-Point Claude at your brand's website, get a brand brain, then recreate winning static ad formats with your own products, offers and copy. Every ad comes out as a clean photographic plate plus fully editable text and UI layers, in both 4:5 feed and 9:16 full-screen.
+You give Claude the website of your brand. Claude makes a brand operating system. Then the skill makes static ads in the format of your reference ads. The ads use your products, your offers, and your copy.
+
+Each ad has a clean photographic plate with no text. Each ad has text layers and UI layers that you can change. The skill makes each ad in 4:5 feed format and in 9:16 full-screen format.
 
 <!-- skills-count:start -->
-Two skills. One brand context every one of them reads.
+This repository contains two skills. Each skill reads the same brand context.
 <!-- skills-count:end -->
 
-> Looking at this folder and it seems near-empty? The skills live in `.claude/`, a hidden folder. It's there. Press `Cmd+Shift+.` in Finder to see it, or just open a Claude session here and everything works.
+> [!NOTE]
+> You do not see many files in this folder. The skills are in `.claude/`. `.claude/` is a hidden folder.
+>
+> In Finder, `Cmd+Shift+.` shows hidden folders. A Claude session in this folder can use the skills.
 
 ## Install
+
+Type this command:
 
 ```bash
 npx skills add han669669/meta-ads-static-creator
 ```
 
-To install only the static-ad skill:
+If you want only the static-ad skill, type this command:
 
 ```bash
 npx skills add han669669/meta-ads-static-creator --skill meta-ads-static-creator
 ```
 
-Run `/brand` first to build the brand operating system before generating ads.
+Before you make ads, type `/brand`.
+
+This command makes the brand operating system.
 
 ## What you need
 
-- **Claude Code** or **Claude Cowork** with this folder open, so Claude can run the scripts.
-- **Python 3.10+**, then `pip install -r requirements.txt`.
-- An image key: a **fal.ai key** (`FAL_KEY`) **or** a **Replicate token** (`REPLICATE_API_TOKEN`, from [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens)). Copy `.env.example` to `.env` and add one. If both are present, fal is used unless you set `IMAGE_PROVIDER` or pass `--provider`. Generation is paid on your own account. Claude runs `--estimate`, shows the cost, and asks before every paid call.
-- **Paper** connected to Claude, for building the editable ad layers.
-- Recommended: **Claude in Chrome**, so `/brand` can read colours, fonts and your logo straight off your site.
+These items are necessary:
+
+- **Claude Code** or **Claude Cowork** is necessary. This folder must be open. Then Claude can start the scripts.
+- **Python 3.10+** (Python 3.10 or a subsequent version) is necessary. Type `pip install -r requirements.txt`.
+- An image key is necessary. The key is a **fal.ai** key (`FAL_KEY`) or a **Replicate** token (`REPLICATE_API_TOKEN`). You can get a Replicate token from [replicate.com/account/api-tokens](https://replicate.com/account/api-tokens). Copy `.env.example` to `.env`. Add one key. If you set both keys, the skill uses fal unless you set `IMAGE_PROVIDER` or pass `--provider`.
+- **Paper** (connected to Claude) is necessary. You use Paper to make the editable ad layers.
+- **Claude in Chrome** is not necessary, but it helps `/brand` read colors, fonts, and your logo from your site.
+
+> [!CAUTION]
+> Approve each paid call before it starts. Image generation has a cost on your own account. Claude uses `--estimate` and shows the cost. Claude asks before each paid call.
 
 ## Start here
+
+Type these commands:
 
 ```bash
 pip install -r requirements.txt
 cp .env.example .env        # then add FAL_KEY and/or REPLICATE_API_TOKEN
 ```
 
-Open a Claude session in this folder and run:
+Open a Claude session in this folder.
+
+Then type this command:
 
 ```
 /brand https://your-brand.com
 ```
 
-That builds your brand's operating system under `brands/[brand-name]/`: strategy, positioning, voice, colour, typography, product catalog, avatars and offers. Nothing else works before it, and every ad is personalised by it.
+This command makes the brand operating system in `brands/[brand-name]/`. The brand system contains strategy, positioning, voice, color, typography, the product catalog, avatars, and offers. No other skill operates before this step. Each ad uses this brand system.
 
-Then drop a winning ad you want to recreate into `brands/[brand-name]/generation/meta-ads-static-creator/ad-references/` and run:
+Then copy the reference ad that you want to make again to `brands/[brand-name]/generation/meta-ads-static-creator/ad-references/`.
+
+Then type this command:
 
 ```
 /meta-ads-static-creator
@@ -60,42 +80,45 @@ Then drop a winning ad you want to recreate into `brands/[brand-name]/generation
 <!-- skills-table:start -->
 | | |
 |---|---|
-| **`/brand`** | Point it at a URL, get a brand brain. Run this first. Also folds new products, images, docs and facts into an existing brand at any time |
-| **`/meta-ads-static-creator`** | Reference-led static ads with editable copy, paired mobile formats, and source-to-overlay approval gates |
+| **`/brand`** | `/brand` makes a brand system from a URL. This is the first command. You can add new products, images, documents, and facts to a brand at any time. |
+| **`/meta-ads-static-creator`** | This skill makes static ads from a reference. Copy is editable. The skill makes paired mobile formats. The skill has source-to-overlay approval gates. |
 <!-- skills-table:end -->
 
 ## How a static ad gets made
 
-1. **Read the reference.** Claude breaks the winning ad into its format devices (search bars, ratings, testimonial cards, labels, badges, proof) and writes copy from your own brand files. It never invents offers or claims.
-2. **Wireframe first.** A full editable layout for each ratio, built with your real copy, before any image is generated.
-3. **Generate only the photography.** A text-free photographic plate per ratio. You approve the cost before anything is spent, and you approve the plate before any copy goes on it.
-4. **Editable overlays.** Text and UI are composed as separate layers in your brand fonts: a flat PNG, an editable SVG, and a layer map for building the ad in Paper.
-5. **Mobile preflight.** Safe zones, platform UI rails and minimum type sizes are checked for both 4:5 and 9:16.
+1. **Read the reference.** Claude reads the reference ad. Claude finds the format devices (search bars, ratings, testimonial cards, labels, badges, proof). Claude writes copy from your brand files. Claude does not make offers or claims that are not in your brand files.
+2. **Wireframe first.** The skill makes a full editable layout for each ratio first. The layout uses copy from your brand files. The skill makes the layout before it makes any image.
+3. **Generate only the photography.** The skill makes one photographic plate with no text for each ratio. You approve the cost before the skill makes a paid call. You approve the plate before the skill adds copy.
+4. **Editable overlays.** The skill makes text and UI as separate layers in your brand fonts. The output is a flat PNG, an editable SVG, and a layer map. You use the layer map to make the ad in Paper.
+5. **Mobile preflight.** The skill does a check of safe zones, platform UI rails, and minimum type sizes. The skill does this check for 4:5 and for 9:16.
 
-Copy and layout changes after that are free. Only a new photographic plate costs money.
+Changes to copy and to layout after this step have no cost. Only a new photographic plate has a cost.
 
 ## Choosing a provider
 
-Both paths use **GPT Image 2.5 Sunburst**. fal is the default for existing setups that only have `FAL_KEY`.
+Both providers use **GPT Image 2.5 Sunburst**. fal is the default when you set only `FAL_KEY`.
 
 | | fal | Replicate |
 |---|---|---|
 | Env | `FAL_KEY` | `REPLICATE_API_TOKEN` |
 | Model | `openai/gpt-image-2.5/sunburst/{edit,text-to-image}` | `openai/gpt-image-2.5-sunburst` |
 | Default quality | `low` (final render: `--final` → `high`) | same |
-| Cost | token-based; `--estimate` cannot give an exact USD figure | per output image (input images free): low $0.012, medium $0.047, high $0.128 (checked 2026-10-06) |
-| 4:5 | native custom size 1229×1536 | generate 1152×1536, centre-crop to 1152×1440 |
+| Cost | Cost is token-based. `--estimate` cannot give an exact USD figure. | Per output image (input images have no cost): low $0.012, medium $0.047, high $0.128 (checked 2026-10-06) |
+| 4:5 | native custom size 1229×1536 | Makes 1152×1536, then a centre-crop to 1152×1440 |
 | Uploads | fal CDN (public by default) | private Files API, deleted after the run |
-| Spend cap | fal account controls | Replicate tokens cannot be spend-capped; use prepaid credit with auto-reload off |
+| Spend cap | fal account controls | Replicate tokens cannot have a spend cap. Use prepaid credit with auto-reload off. |
 
-Provider resolution: `--provider` → `spec.json` `"provider"` → `IMAGE_PROVIDER` → whichever single key is set → fal.
+> [!CAUTION]
+> Use prepaid credit with auto-reload off. Replicate tokens cannot have a spend cap.
 
-First-pass plates and edits generate at **low**. Pass `--final` (or `--quality high`) only for a last high-quality render.
+The skill selects the provider in this order: `--provider` → `spec.json` `"provider"` → `IMAGE_PROVIDER` → whichever single key is set → fal.
+
+The skill makes first-pass plates and edits at **low**. Pass `--final` (or `--quality high`) only for a last high-quality render.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `CLAUDE.md` | How the system works and the rules it follows |
-| `.claude/skills/` | The skills. Each one is a self-contained folder |
-| `brands/[brand]/` | Created by `/brand`: `intelligence/` (what the brand is) and `generation/` (the ads you make). Don't build it by hand |
+| `CLAUDE.md` | How the system operates and the rules that it follows |
+| `.claude/skills/` | The skills. Each skill is in one folder that contains all of its files. |
+| `brands/[brand]/` | `/brand` makes this folder. It contains `intelligence/` (what the brand is) and `generation/` (the ads that you make). Do not make this folder without `/brand`. |
