@@ -400,26 +400,57 @@ class GenerateTests(unittest.TestCase):
 
 
 class ResolveTests(unittest.TestCase):
-    def test_order(self):
+    def test_only_replicate_key_uses_replicate(self):
         with mock.patch.dict(
             os.environ, {"IMAGE_PROVIDER": "", "FAL_KEY": "", "REPLICATE_API_TOKEN": "x"}
         ):
-            self.assertEqual(resolve_provider(None, {})[0], "replicate")
-            self.assertEqual(resolve_provider("fal", {"provider": "replicate"})[0], "fal")
-            self.assertEqual(resolve_provider(None, {"provider": "fal"})[0], "fal")
-            self.assertEqual(resolve_provider(None, {})[1], "only REPLICATE_API_TOKEN is set")
+            name, why = resolve_provider(None, {})
+            self.assertEqual(name, "replicate")
+            self.assertEqual(why, "only REPLICATE_API_TOKEN is set")
+
+    def test_only_fal_key_uses_fal(self):
+        with mock.patch.dict(
+            os.environ, {"IMAGE_PROVIDER": "", "FAL_KEY": "a", "REPLICATE_API_TOKEN": ""}
+        ):
+            name, why = resolve_provider(None, {})
+            self.assertEqual(name, "fal")
+            self.assertEqual(why, "only FAL_KEY is set")
+
+    def test_both_keys_default_to_replicate(self):
         with mock.patch.dict(
             os.environ, {"IMAGE_PROVIDER": "", "FAL_KEY": "a", "REPLICATE_API_TOKEN": "b"}
+        ):
+            self.assertEqual(resolve_provider(None, {})[0], "replicate")
+
+    def test_neither_key_defaults_to_replicate(self):
+        with mock.patch.dict(
+            os.environ, {"IMAGE_PROVIDER": "", "FAL_KEY": "", "REPLICATE_API_TOKEN": ""}
+        ):
+            name, why = resolve_provider(None, {})
+            self.assertEqual(name, "replicate")
+            self.assertEqual(why, "no key set")
+
+    def test_cli_provider_overrides_spec_and_keys(self):
+        with mock.patch.dict(
+            os.environ, {"IMAGE_PROVIDER": "", "FAL_KEY": "", "REPLICATE_API_TOKEN": "x"}
+        ):
+            self.assertEqual(resolve_provider("fal", {"provider": "replicate"})[0], "fal")
+
+    def test_spec_provider_overrides_env_and_keys(self):
+        with mock.patch.dict(
+            os.environ, {"IMAGE_PROVIDER": "replicate", "FAL_KEY": "a", "REPLICATE_API_TOKEN": "b"}
+        ):
+            self.assertEqual(resolve_provider(None, {"provider": "fal"})[0], "fal")
+
+    def test_image_provider_env_overrides_keys(self):
+        with mock.patch.dict(
+            os.environ, {"IMAGE_PROVIDER": "fal", "FAL_KEY": "a", "REPLICATE_API_TOKEN": "b"}
         ):
             self.assertEqual(resolve_provider(None, {})[0], "fal")
         with mock.patch.dict(
             os.environ, {"IMAGE_PROVIDER": "replicate", "FAL_KEY": "a", "REPLICATE_API_TOKEN": "b"}
         ):
             self.assertEqual(resolve_provider(None, {})[0], "replicate")
-        with mock.patch.dict(
-            os.environ, {"IMAGE_PROVIDER": "", "FAL_KEY": "a", "REPLICATE_API_TOKEN": ""}
-        ):
-            self.assertEqual(resolve_provider(None, {})[0], "fal")
 
 
 class EnvLoadTests(unittest.TestCase):
@@ -474,9 +505,15 @@ class CliEstimateTests(unittest.TestCase):
         (tmp / "spec.json").write_text(json.dumps(spec))
         return tmp
 
-    def _run(self, tmp, args):
-        env = {k: v for k, v in os.environ.items() if k not in ("FAL_KEY", "REPLICATE_API_TOKEN")}
+    def _run(self, tmp, args, extra_env=None):
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("FAL_KEY", "REPLICATE_API_TOKEN", "IMAGE_PROVIDER")
+        }
         env.update(HTTPS_PROXY="http://127.0.0.1:9", HTTP_PROXY="http://127.0.0.1:9")
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             [sys.executable, str(SCRIPT), str(tmp), *args],
             capture_output=True,
@@ -539,6 +576,53 @@ class CliEstimateTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
         self.assertIn('"quality": "medium"', out.stdout)
         self.assertIn('"est_cost_usd": 0.047', out.stdout)
+
+
+    def test_estimate_neither_key_defaults_to_replicate(self):
+        tmp = self._spec(Path(tempfile.mkdtemp()))
+        out = self._run(tmp, ["--variant", "feed_4x5", "--estimate"])
+        self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
+        self.assertIn('"provider": "replicate"', out.stdout)
+        self.assertIn("no key set", out.stdout)
+
+    def test_estimate_both_keys_defaults_to_replicate(self):
+        tmp = self._spec(Path(tempfile.mkdtemp()))
+        out = self._run(
+            tmp,
+            ["--variant", "feed_4x5", "--estimate"],
+            extra_env={"FAL_KEY": "fal-test", "REPLICATE_API_TOKEN": "r8_test"},
+        )
+        self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
+        self.assertIn('"provider": "replicate"', out.stdout)
+
+    def test_estimate_only_fal_key_uses_fal(self):
+        tmp = self._spec(Path(tempfile.mkdtemp()))
+        out = self._run(
+            tmp,
+            ["--variant", "feed_4x5", "--estimate"],
+            extra_env={"FAL_KEY": "fal-test"},
+        )
+        self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
+        self.assertIn('"provider": "fal"', out.stdout)
+
+    def test_estimate_cli_override_wins_over_both_keys(self):
+        tmp = self._spec(Path(tempfile.mkdtemp()))
+        out = self._run(
+            tmp,
+            ["--variant", "feed_4x5", "--provider", "fal", "--estimate"],
+            extra_env={"FAL_KEY": "fal-test", "REPLICATE_API_TOKEN": "r8_test"},
+        )
+        self.assertEqual(out.returncode, 0, out.stderr + out.stdout)
+        self.assertIn('"provider": "fal"', out.stdout)
+
+    def test_generate_neither_key_helpful_error(self):
+        tmp = self._spec(Path(tempfile.mkdtemp()))
+        out = self._run(tmp, ["--variant", "feed_4x5"])
+        self.assertNotEqual(out.returncode, 0)
+        msg = out.stderr + out.stdout
+        self.assertIn("REPLICATE_API_TOKEN (recommended)", msg)
+        self.assertIn("FAL_KEY", msg)
+        self.assertEqual(list(tmp.glob("*-plate_v*.png")), [])
 
 
 if __name__ == "__main__":

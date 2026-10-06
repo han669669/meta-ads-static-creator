@@ -4,7 +4,7 @@ description: "Create reference-led static ads with editable copy: generate only 
 image_model: GPT Image 2.5 Sunburst
 group: Ads
 summary: Reference-led static ads with editable copy, paired mobile formats, and source-to-overlay approval gates
-version: 2.1.0
+version: 2.2.0
 outputs: [meta-ads-static-creator]
 inboxes:
   meta-ads-static-creator/ad-references: Ad references
@@ -112,9 +112,10 @@ wireframe screenshots with the run.
 ## 4. Generate only the photography
 
 Choose the provider before quoting cost: `--provider`, else `spec.json`
-`"provider"`, else `IMAGE_PROVIDER`, else whichever single key is set. fal stays
-the default when only `FAL_KEY` is set, and when both keys are set. Never switch
-provider after approval without a fresh quote.
+`"provider"`, else `IMAGE_PROVIDER`, else whichever single key is set.
+Replicate is the default when both keys are set, or when no key is set. fal is
+used when only `FAL_KEY` is set. Never switch provider after approval without a
+fresh quote.
 
 Use `generate-blank-ad.py` once for each ratio. The prompt names the exact image
 zone, crop, product/scale references and required clear space. Generate no ad copy,
