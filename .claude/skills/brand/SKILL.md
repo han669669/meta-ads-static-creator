@@ -13,6 +13,14 @@ metadata:
   published-by: "han669669"
 ---
 
+## Summary
+
+- This skill makes a brand system. Other skills read this system.
+- You give a website URL, brand documents, or a description of the brand.
+- You get a brand folder with strategy, positioning, voice, color, typography, the logo, the product catalog, avatars, and offers.
+- You can add new products, images, documents, and facts at any time.
+- An image key is not necessary. Claude in Chrome is not necessary, but it helps the skill read colors, fonts, and the logo from your site.
+
 # Brand Setup & Brand Operating System
 
 Created by Joey Mulcahy — https://joeymulcahy.com/. Published here without his permission.
