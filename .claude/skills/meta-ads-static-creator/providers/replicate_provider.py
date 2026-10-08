@@ -23,7 +23,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -48,6 +48,8 @@ POLL_DEADLINE_S = 16 * 60
 # URLs live on api.replicate.com. Do not allow the rest of replicate.com.
 OUTPUT_HOSTS = ("replicate.delivery", "api.replicate.com")
 POLL_URL_PREFIX = f"{API}/predictions/"
+MAX_REDIRECTS = 5
+_REDIRECT = frozenset({301, 302, 303, 307, 308})
 
 # ratio -> (aspect_ratio enum value, crop_to). 4:5 is not native: generate
 # 1152x1536 (3:4) and centre-crop to 1152x1440. 9:16 is native at 1152x2048.
@@ -289,6 +291,66 @@ def _output_host_allowed(host: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in OUTPUT_HOSTS)
 
 
+def _plain_session() -> requests.Session:
+    """Unauthenticated session for output GETs. No API token."""
+    return requests.Session()
+
+
+def _output_url_ok(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ProviderError(
+            f"refusing to download output from non-HTTPS URL ({parsed.scheme})"
+        )
+    host = parsed.hostname or ""
+    if not _output_host_allowed(host):
+        raise ProviderError(f"refusing to download output from unexpected host {host}")
+
+
+def _redirect_target(current: str, response: requests.Response) -> str:
+    loc = (response.headers.get("Location") or "").strip()
+    if not loc:
+        raise ProviderError("refusing redirect with empty Location", billed=True)
+    return urljoin(current, loc)
+
+
+def _get_output(s: requests.Session, url: str, *, timeout: int) -> requests.Response:
+    return _get(s, url, timeout=timeout, allow_redirects=False)
+
+
+def _follow_output_redirects(
+    s: requests.Session,
+    url: str,
+    r: requests.Response,
+    *,
+    timeout: int,
+    auth_host: Optional[str] = None,
+) -> Tuple[str, requests.Response]:
+    """Follow 3xx hops. Re-check HTTPS + allow-list on each Location.
+
+    Authorization is kept only while the hop stays on the same allow-listed
+    host that was authenticated. A different host (even if allow-listed) is
+    fetched without the token.
+    """
+    hops = 0
+    while r.status_code in _REDIRECT:
+        hops += 1
+        if hops > MAX_REDIRECTS:
+            raise ProviderError(
+                f"too many redirects while downloading output (>{MAX_REDIRECTS})",
+                billed=True,
+            )
+        nxt = _redirect_target(url, r)
+        _output_url_ok(nxt)
+        nxt_host = (urlparse(nxt).hostname or "").lower()
+        if auth_host is not None and nxt_host != auth_host:
+            s = _plain_session()
+            auth_host = None
+        r = _get_output(s, nxt, timeout=timeout)
+        url = nxt
+    return url, r
+
+
 def _first_url(output: Any) -> Optional[str]:
     if isinstance(output, str):
         return output
@@ -303,18 +365,22 @@ def _first_url(output: Any) -> Optional[str]:
 
 
 def _download(s: requests.Session, url: str) -> bytes:
-    parsed = urlparse(url)
-    if parsed.scheme != "https":
-        raise ProviderError(f"refusing to download output from non-HTTPS URL ({parsed.scheme})")
-    host = parsed.hostname or ""
-    if not _output_host_allowed(host):
-        raise ProviderError(f"refusing to download output from unexpected host {host}")
-    # replicate.delivery URLs are often public. The HTTP API still documents
+    _output_url_ok(url)
+    timeout = 120
+    # replicate.delivery URLs are often public. Use the same retry/backoff as
+    # other GETs, but without the API token. The HTTP API still documents
     # Authorization for some file URLs, so retry with the token only on 401/403
-    # and only after the host allow-list above.
-    r = requests.get(url, timeout=120)
+    # and only after the host allow-list above. Redirects are followed by hand
+    # so a 3xx cannot land on an unchecked host with the Bearer token.
+    plain = _plain_session()
+    r = _get_output(plain, url, timeout=timeout)
+    url, r = _follow_output_redirects(plain, url, r, timeout=timeout)
     if r.status_code in (401, 403):
-        r = _get(s, url, timeout=120)
+        auth_host = (urlparse(url).hostname or "").lower()
+        r = _get_output(s, url, timeout=timeout)
+        url, r = _follow_output_redirects(
+            s, url, r, timeout=timeout, auth_host=auth_host
+        )
     if not r.ok:
         raise ProviderError(
             f"output download failed: HTTP {r.status_code}. URLs expire after 1 hour.",

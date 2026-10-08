@@ -10,7 +10,7 @@ Schema: https://fal.ai/models/openai/gpt-image-2.5/sunburst/edit/api
 from __future__ import annotations
 
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -25,6 +25,8 @@ DEFAULT_MODEL = EDIT_MODEL
 # Output CDN: v3b.fal.media (documented URL form), v3.fal.media / fal.media
 # (SDK upload fallbacks), and fal.run app hosts. Subdomains of each are allowed.
 OUTPUT_HOSTS = ("fal.media", "fal.run")
+MAX_REDIRECTS = 5
+_REDIRECT = frozenset({301, 302, 303, 307, 308})
 
 SIZE = {
     "1:1": (1024, 1024),
@@ -79,7 +81,7 @@ def _output_host_allowed(host: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in OUTPUT_HOSTS)
 
 
-def _download_output(url: str) -> bytes:
+def _output_url_ok(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise ProviderError(
@@ -88,9 +90,28 @@ def _download_output(url: str) -> bytes:
     host = parsed.hostname or ""
     if not _output_host_allowed(host):
         raise ProviderError(f"refusing to download output from unexpected host {host}")
-    r = requests.get(url, timeout=120)
-    r.raise_for_status()
-    return r.content
+
+
+def _redirect_target(current: str, response: requests.Response) -> str:
+    loc = (response.headers.get("Location") or "").strip()
+    if not loc:
+        raise ProviderError("refusing redirect with empty Location")
+    return urljoin(current, loc)
+
+
+def _download_output(url: str) -> bytes:
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        _output_url_ok(current)
+        r = requests.get(current, timeout=120, allow_redirects=False)
+        if r.status_code in _REDIRECT:
+            current = _redirect_target(current, r)
+            continue
+        r.raise_for_status()
+        return r.content
+    raise ProviderError(
+        f"too many redirects while downloading output (>{MAX_REDIRECTS})"
+    )
 
 
 def generate(

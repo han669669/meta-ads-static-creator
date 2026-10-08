@@ -63,7 +63,7 @@ def _arg(flag, default=None):
 def _is_home(path: Path) -> bool:
     try:
         return path.resolve() == Path.home().resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return False
 
 
@@ -97,11 +97,11 @@ def _project_root() -> Path:
 
 
 def _load_env():
-    """Load allow-listed keys from the project-root .env only.
+    """Fill missing allow-listed keys from the project-root .env.
 
-    Does not walk parent folders, does not load non-allow-listed keys, and
-    never overrides variables already set in the environment. Never reads
-    ~/.env.
+    Process environment values already set win (setdefault). Does not walk
+    parent folders for extra .env files, does not load non-allow-listed keys,
+    and never reads ~/.env.
     """
     root = _project_root()
     if _is_home(root):

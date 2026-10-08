@@ -60,10 +60,11 @@ subdomains). fal goes through `fal_client` (upload + run); output images are
 downloaded from fal CDN URLs on `fal.media` / `fal.run` hosts (including
 `v3.fal.media` and `v3b.fal.media`).
 
-**Keys.** The scripts read `FAL_KEY`, `REPLICATE_API_TOKEN` and `IMAGE_PROVIDER`
-from the project `.env` only (`$CLAUDE_PROJECT_DIR`, then the working directory,
-then a parent that contains `.claude`). They never read `~/.env`. They do not
-load any other env names from that file.
+**Keys.** The scripts use `FAL_KEY`, `REPLICATE_API_TOKEN` and `IMAGE_PROVIDER`
+from the process environment. Missing names are filled from the project `.env`
+(`$CLAUDE_PROJECT_DIR`, then the working directory, then a parent that contains
+`.claude`) with `setdefault`, so an exported value wins. They never read
+`~/.env`. They do not load any other env names from that file.
 
 **Token scope.** `REPLICATE_API_TOKEN` is sent as `Authorization: Bearer` to
 `api.replicate.com`. Output downloads start as a plain GET with no token; on

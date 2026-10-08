@@ -41,7 +41,9 @@ python3 "${CLAUDE_SKILL_DIR}/brand.py" --scrape https://brand.com
 
 `--scaffold` still writes under the project's `brands/` tree. Later catalog,
 logo, font and context commands run from `brands/[brand-name]/intelligence/` so
-outputs land in that folder.
+outputs land in that folder. Do not prefix them with `cd … &&`: Claude Code
+splits compound commands on `&&`, and `allowed-tools` only matches the
+`python3 ${CLAUDE_SKILL_DIR}/*` subcommand.
 
 ## Bundled files, network and credentials
 
@@ -331,10 +333,10 @@ screenshot of your type page."*
 
 Always include the verbatim `note` verification caveat in `typography.json` (fonts
 are inferred — a model can misread them). Then collect the actual font files for
-open-license faces:
+open-license faces, from the brand's `intelligence/`:
 
 ```bash
-cd ./brands/[brand-name]/intelligence && python3 "${CLAUDE_SKILL_DIR}/brand.py" --fetch-fonts "Inter,Playfair Display"
+python3 "${CLAUDE_SKILL_DIR}/brand.py" --fetch-fonts "Inter,Playfair Display"
 ```
 
 Only `google-fonts` families resolve; licensed/foundry faces (Adobe, Monotype,
@@ -361,9 +363,9 @@ name and file aren't available.
 Collect the brand's logo into `./brands/[brand-name]/intelligence/logos/`.
 Source in priority order:
 
-1. **HTTP fetch (preferred — no browser needed).** Run:
+1. **HTTP fetch (preferred — no browser needed).** From the brand's `intelligence/`:
    ```bash
-   cd ./brands/[brand-name]/intelligence && python3 "${CLAUDE_SKILL_DIR}/brand.py" --fetch-logo https://brand.com
+   python3 "${CLAUDE_SKILL_DIR}/brand.py" --fetch-logo https://brand.com
    ```
    Tries schema.org JSON-LD `Organization.logo`, then a header/nav `<img>`, then
    the largest declared favicon — in that order — and downloads what it finds as
@@ -502,11 +504,11 @@ hyphens); then run the reindex in 6c.
 Run the scraper from inside `intelligence/` so images and `products.json` land
 correctly. **Preferred — exact product URLs:**
 ```bash
-cd ./brands/[brand-name]/intelligence && python3 "${CLAUDE_SKILL_DIR}/brand.py" --scrape https://brand.com --product-urls "https://brand.com/products/one,https://brand.com/products/two"
+python3 "${CLAUDE_SKILL_DIR}/brand.py" --scrape https://brand.com --product-urls "https://brand.com/products/one,https://brand.com/products/two"
 ```
 **Best-sellers:**
 ```bash
-cd ./brands/[brand-name]/intelligence && python3 "${CLAUDE_SKILL_DIR}/brand.py" --scrape https://brand.com
+python3 "${CLAUDE_SKILL_DIR}/brand.py" --scrape https://brand.com
 ```
 
 This writes flat images `product-images/[slug]-01.jpg …` and a catalog
@@ -522,7 +524,7 @@ the browser, or ask the user for images.
    `{ name, product_url, image_urls }` for each to `products-to-ingest.json` in
    `intelligence/`. Then:
    ```bash
-   cd ./brands/[brand-name]/intelligence && python3 "${CLAUDE_SKILL_DIR}/brand.py" --ingest-file products-to-ingest.json
+   python3 "${CLAUDE_SKILL_DIR}/brand.py" --ingest-file products-to-ingest.json
    ```
 2. **Ask the user** — if the public page cannot be read, ask for product images
    and have them dropped into `intelligence/product-images/` named
@@ -534,7 +536,7 @@ After the user drops images in by hand — or to reconcile the catalog with what
 actually on disk — rebuild `products.json` (preserving any enrichment already
 recorded):
 ```bash
-cd ./brands/[brand-name]/intelligence && python3 "${CLAUDE_SKILL_DIR}/brand.py" --index
+python3 "${CLAUDE_SKILL_DIR}/brand.py" --index
 ```
 
 ### 6d — Enrich the catalog
@@ -636,7 +638,7 @@ built from. This runs *alongside* the refinement below — it never replaces it.
   document, screenshot, line sheet — anything with no dedicated home of its own).
   From the brand's `intelligence/`:
   ```bash
-  cd ./brands/[brand-name]/intelligence && python3 "${CLAUDE_SKILL_DIR}/brand.py" --save-context "[path-to-file]" --move
+  python3 "${CLAUDE_SKILL_DIR}/brand.py" --save-context "[path-to-file]" --move
   ```
   Use `--move` for a throwaway chat upload under `uploads/` (its permanent home
   is now `context-uploads/`); drop `--move` to copy a file the user keeps

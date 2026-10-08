@@ -50,7 +50,7 @@ Usage:
   # Create the folder tree first, from the project root:
   python3 .claude/skills/brand/brand.py --scaffold "Blue Elephant"
 
-  cd ./brands/[brand-name]/intelligence
+  # Then, from ./brands/[brand-name]/intelligence:
 
   # Download top best-sellers only:
   python3 ../../../.claude/skills/brand/brand.py --scrape https://brand.com
