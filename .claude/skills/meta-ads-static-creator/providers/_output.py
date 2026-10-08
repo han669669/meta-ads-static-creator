@@ -24,7 +24,10 @@ import requests
 MAX_REDIRECTS = 5
 REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
 
-Fail = Callable[[str], NoReturn]
+# fail(message, *, status=None). status is set for HTTP final responses so a
+# provider can add its own hint (Replicate expiry) without changing the
+# shared text. Other failures omit status.
+Fail = Callable[..., NoReturn]
 Get = Callable[..., Any]
 
 
@@ -122,5 +125,8 @@ def fetch_output(
         )
         url = nxt
     if r.status_code not in passthrough and not _is_ok(r):
-        fail(f"output download failed: HTTP {r.status_code}")
+        fail(
+            f"output download failed: HTTP {r.status_code}",
+            status=int(r.status_code),
+        )
     return url, r

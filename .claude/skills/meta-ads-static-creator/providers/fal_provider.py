@@ -74,9 +74,10 @@ def plan(req: PlateRequest) -> Plan:
     )
 
 
-def _output_fail(message: str) -> NoReturn:
+def _output_fail(message: str, *, status: Optional[int] = None) -> NoReturn:
     # fal_client.run has already succeeded when we download, so a broken
     # redirect or refused host is billed — same as "no image returned".
+    # fal CDN URLs have no 1-hour expiry; status is accepted and ignored.
     raise ProviderError(message, billed=True)
 
 

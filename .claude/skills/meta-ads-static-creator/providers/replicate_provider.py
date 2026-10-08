@@ -289,8 +289,14 @@ def _plain_session() -> requests.Session:
     return requests.Session()
 
 
-def _output_fail(message: str) -> NoReturn:
+# Output URLs expire after an hour; these statuses usually mean gone/expired.
+_EXPIRED_STATUSES = frozenset({401, 403, 404, 410})
+
+
+def _output_fail(message: str, *, status: Optional[int] = None) -> NoReturn:
     # Called only from _download after a succeeded prediction, so billed.
+    if status in _EXPIRED_STATUSES:
+        message = f"{message}. URLs expire after 1 hour."
     raise ProviderError(message, billed=True)
 
 

@@ -749,6 +749,32 @@ class ReplicateOutputRedirectTests(unittest.TestCase):
             [g for g in auth_gets if "api.replicate.com" in g["url"]], []
         )
 
+    def _download_http_status(self, status: int) -> ProviderError:
+        auth = self._auth()
+        _record_gets(auth, lambda _url, _kw, _headers: FakeResp(status))
+        plain = rp._plain_session()
+        _record_gets(plain, lambda _url, _kw, _headers: FakeResp(status))
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            with self.assertRaises(ProviderError) as cm:
+                rp._download(auth, "https://replicate.delivery/x.png")
+        return cm.exception
+
+    def test_4xx_includes_expiry_hint(self):
+        for status in (401, 403, 404, 410):
+            with self.subTest(status=status):
+                err = self._download_http_status(status)
+                self.assertEqual(
+                    str(err),
+                    f"output download failed: HTTP {status}. URLs expire after 1 hour.",
+                )
+                self.assertIs(err.billed, True)
+
+    def test_5xx_does_not_include_expiry_hint(self):
+        err = self._download_http_status(503)
+        self.assertEqual(str(err), "output download failed: HTTP 503")
+        self.assertNotIn("URLs expire after 1 hour.", str(err))
+        self.assertIs(err.billed, True)
+
 
 class ResolveTests(unittest.TestCase):
     def test_only_replicate_key_uses_replicate(self):
@@ -1031,6 +1057,7 @@ class FalDownloadTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as cm:
                 fp._download_output("https://v3b.fal.media/files/b/x/out.png")
         self.assertIn("HTTP 401", str(cm.exception))
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
         self.assertIs(cm.exception.billed, True)
 
     def test_final_429_is_billed_provider_error(self):
@@ -1040,6 +1067,7 @@ class FalDownloadTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as cm:
                 fp._download_output("https://v3b.fal.media/files/b/x/out.png")
         self.assertIn("HTTP 429", str(cm.exception))
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
         self.assertIs(cm.exception.billed, True)
 
     def test_final_503_is_billed_provider_error(self):
@@ -1049,6 +1077,7 @@ class FalDownloadTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as cm:
                 fp._download_output("https://v3b.fal.media/files/b/x/out.png")
         self.assertIn("HTTP 503", str(cm.exception))
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
         self.assertIs(cm.exception.billed, True)
 
     def test_timeout_is_billed_provider_error(self):
@@ -1058,6 +1087,7 @@ class FalDownloadTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as cm:
                 fp._download_output("https://v3b.fal.media/files/b/x/out.png")
         self.assertIn("output download failed", str(cm.exception))
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
         self.assertIs(cm.exception.billed, True)
         self.assertNotIsInstance(cm.exception, requests.RequestException)
 

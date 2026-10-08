@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from typing import Optional
 
 import requests
 
@@ -22,7 +23,7 @@ class FakeResp:
         self.ok = 200 <= status < 300
 
 
-def _fail(message: str) -> None:
+def _fail(message: str, *, status: Optional[int] = None) -> None:
     raise ProviderError(message, billed=True)
 
 
@@ -247,6 +248,7 @@ class FetchOutputTests(unittest.TestCase):
             )
         self.assertIn("HTTP 503", str(cm.exception))
         self.assertIs(cm.exception.billed, True)
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
 
     def test_passthrough_returns_401_without_failing(self):
         def get(url, *, credentials):
