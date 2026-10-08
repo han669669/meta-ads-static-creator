@@ -97,7 +97,7 @@ entries, each `{ "role", "family", "description", "fallback", "source", "weights
   (Typekit), `self-hosted`, `system`, or `unknown`. Derive it from the
   `links`/`loaded` evidence the extractor returns. This decides whether `/brand`
   can auto-download it: **only `google-fonts` families can be fetched into
-  `fonts/`** (via `brand.py --fetch-fonts`); licensed/foundry faces must be added
+  `fonts/`** (via `python3 "${CLAUDE_SKILL_DIR}/brand.py" --fetch-fonts`); licensed/foundry faces must be added
   by hand.
 - **`weights`:** the weights actually loaded, as strings (`"400"`, `"700"`).
   Empty array if unknown.

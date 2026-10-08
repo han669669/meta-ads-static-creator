@@ -64,6 +64,10 @@ class FakeResp:
             raise ValueError("no json")
         return self._body
 
+    def raise_for_status(self):
+        if not self.ok:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
 
 class PlanTests(unittest.TestCase):
     def setUp(self):
@@ -199,12 +203,24 @@ class GenerateTests(unittest.TestCase):
         seq = iter(polls)
 
         def get(url, **kw):
-            if "replicate.delivery" in url:
+            # Authenticated retry path only. The first output GET is requests.get.
+            if download is not None and (
+                "replicate.delivery" in url or url.startswith("https://api.replicate.com/v1/files/")
+            ):
                 return download
             return next(seq)
 
         s.get.side_effect = get
         return s
+
+    def _run_generate(self, s, *, download=None, resume_id=None, req=None):
+        if download is None:
+            download = FakeResp(200, content=_png_bytes((64, 64)))
+        req = req or self.req
+        with mock.patch.object(rp, "_session", return_value=s):
+            with mock.patch.object(rp.requests, "get", return_value=download) as plain_get:
+                self.plain_get = plain_get
+                return rp.generate(req, rp.plan(req), resume_id=resume_id)
 
     def test_happy_path_with_polling(self):
         pred = {
@@ -225,11 +241,20 @@ class GenerateTests(unittest.TestCase):
         s = self._session(
             FakeResp(201, pred),
             [FakeResp(200, dict(pred, status="processing")), FakeResp(200, done)],
-            FakeResp(200, content=_png_bytes((1152, 2048))),
+            None,
         )
-        with mock.patch.object(rp, "_session", return_value=s):
-            res = rp.generate(self.req, rp.plan(self.req))
+        res = self._run_generate(
+            s, download=FakeResp(200, content=_png_bytes((1152, 2048)))
+        )
         self.assertEqual(res.meta["prediction_id"], "p1")
+        self.plain_get.assert_called()
+        self.assertEqual(self.plain_get.call_args.kwargs.get("timeout"), 120)
+        self.assertNotIn("headers", self.plain_get.call_args.kwargs)
+        self.assertNotIn("Authorization", self.plain_get.call_args.kwargs)
+        delivery_gets = [
+            c for c in s.get.call_args_list if c.args and "replicate.delivery" in c.args[0]
+        ]
+        self.assertEqual(len(delivery_gets), 0)
         self.assertEqual(
             self.sent["input"]["input_images"],
             ["https://api.replicate.com/v1/files/f0", "https://api.replicate.com/v1/files/f1"],
@@ -308,9 +333,8 @@ class GenerateTests(unittest.TestCase):
                 return FakeResp(429, {"detail": "throttled"}, headers={"Retry-After": "0"})
             return FakeResp(201, pred)
 
-        s = self._session(create_resp, [], FakeResp(200, content=_png_bytes((64, 64))))
-        with mock.patch.object(rp, "_session", return_value=s):
-            res = rp.generate(self.req, rp.plan(self.req))
+        s = self._session(create_resp, [], None)
+        res = self._run_generate(s)
         self.assertEqual(res.meta["prediction_id"], "p429")
         creates = [c for c in s.post.call_args_list if c.args[0].endswith("/predictions")]
         self.assertEqual(len(creates), 2)
@@ -342,6 +366,93 @@ class GenerateTests(unittest.TestCase):
                 rp.generate(self.req, rp.plan(self.req))
         self.assertIn("non-HTTPS", str(cm.exception))
 
+    def test_refuses_replicate_com_apex(self):
+        pred = {
+            "id": "p3c",
+            "status": "succeeded",
+            "output": ["https://replicate.com/static/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p3c"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with self.assertRaises(ProviderError) as cm:
+                rp.generate(self.req, rp.plan(self.req))
+        self.assertIn("unexpected host", str(cm.exception))
+
+    def test_allows_replicate_delivery_subdomain(self):
+        pred = {
+            "id": "p-sub",
+            "status": "succeeded",
+            "output": ["https://pbxt.replicate.delivery/xezq/abc/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p-sub"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        res = self._run_generate(s)
+        self.assertEqual(res.meta["prediction_id"], "p-sub")
+        self.assertEqual(
+            self.plain_get.call_args.args[0],
+            "https://pbxt.replicate.delivery/xezq/abc/out.png",
+        )
+
+    def test_download_retries_with_token_on_401(self):
+        pred = {
+            "id": "p401",
+            "status": "succeeded",
+            "output": ["https://replicate.delivery/xezq/abc/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p401"},
+        }
+        auth_download = FakeResp(200, content=_png_bytes((64, 64)))
+        s = self._session(FakeResp(201, pred), [], auth_download)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with mock.patch.object(rp.requests, "get", return_value=FakeResp(401)):
+                res = rp.generate(self.req, rp.plan(self.req))
+        self.assertEqual(res.meta["prediction_id"], "p401")
+        delivery_gets = [
+            c for c in s.get.call_args_list if c.args and "replicate.delivery" in c.args[0]
+        ]
+        self.assertEqual(len(delivery_gets), 1)
+
+    def test_download_retries_with_token_on_403(self):
+        pred = {
+            "id": "p403",
+            "status": "succeeded",
+            "output": ["https://replicate.delivery/xezq/abc/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p403"},
+        }
+        auth_download = FakeResp(200, content=_png_bytes((64, 64)))
+        s = self._session(FakeResp(201, pred), [], auth_download)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with mock.patch.object(rp.requests, "get", return_value=FakeResp(403)):
+                res = rp.generate(self.req, rp.plan(self.req))
+        self.assertEqual(res.meta["prediction_id"], "p403")
+
+    def test_poll_url_must_be_predictions_api(self):
+        pred = {
+            "id": "p-evil",
+            "status": "starting",
+            "output": None,
+            "urls": {"get": "https://evil.example.com/steal"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with self.assertRaises(ProviderError) as cm:
+                rp.generate(self.req, rp.plan(self.req))
+        self.assertIn("unexpected URL", str(cm.exception))
+        self.assertIn("https://api.replicate.com/v1/predictions/", str(cm.exception))
+
+    def test_poll_url_rejects_files_endpoint(self):
+        pred = {
+            "id": "p-files",
+            "status": "starting",
+            "output": None,
+            "urls": {"get": "https://api.replicate.com/v1/files/f1"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with self.assertRaises(ProviderError) as cm:
+                rp.generate(self.req, rp.plan(self.req))
+        self.assertIn("unexpected URL", str(cm.exception))
+
     def test_resume_skips_create_and_upload(self):
         pred = {
             "id": "p-resume",
@@ -350,12 +461,8 @@ class GenerateTests(unittest.TestCase):
             "urls": {"get": "https://api.replicate.com/v1/predictions/p-resume"},
         }
         s = mock.MagicMock()
-        s.get.side_effect = [
-            FakeResp(200, pred),
-            FakeResp(200, content=_png_bytes((64, 64))),
-        ]
-        with mock.patch.object(rp, "_session", return_value=s):
-            res = rp.generate(self.req, rp.plan(self.req), resume_id="p-resume")
+        s.get.return_value = FakeResp(200, pred)
+        res = self._run_generate(s, resume_id="p-resume")
         self.assertEqual(res.meta["prediction_id"], "p-resume")
         s.post.assert_not_called()
         s.delete.assert_not_called()
@@ -385,16 +492,15 @@ class GenerateTests(unittest.TestCase):
             raise requests.Timeout("create timed out")
 
         def get(url, **kw):
-            if "replicate.delivery" in url:
-                return FakeResp(200, content=_png_bytes((64, 64)))
             if url.rstrip("/").endswith("/predictions"):
                 return FakeResp(200, {"results": [pred]})
             return FakeResp(200, pred)
 
         s.post.side_effect = post
         s.get.side_effect = get
-        with mock.patch.object(rp, "_session", return_value=s):
-            res = rp.generate(self.req, plan)
+        with mock.patch.object(rp.requests, "get", return_value=FakeResp(200, content=_png_bytes((64, 64)))):
+            with mock.patch.object(rp, "_session", return_value=s):
+                res = rp.generate(self.req, plan)
         self.assertEqual(res.meta["prediction_id"], "p-found")
         self.assertEqual(s.delete.call_count, 2)
 
@@ -482,6 +588,117 @@ class EnvLoadTests(unittest.TestCase):
             with mock.patch.object(gba, "_project_root", return_value=tmp):
                 gba._load_env()
                 self.assertEqual(os.environ["REPLICATE_API_TOKEN"], "already-set")
+
+    def test_project_root_prefers_claude_project_dir(self):
+        gba = _load_script()
+        project = Path(tempfile.mkdtemp()).resolve()
+        cwd = Path(tempfile.mkdtemp()).resolve()
+        (cwd / ".claude").mkdir()
+        old = os.getcwd()
+        try:
+            os.chdir(cwd)
+            with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(project)}):
+                self.assertEqual(gba._project_root().resolve(), project)
+        finally:
+            os.chdir(old)
+
+    def test_project_root_uses_cwd_when_it_has_env(self):
+        gba = _load_script()
+        parent = Path(tempfile.mkdtemp()).resolve()
+        (parent / ".claude").mkdir()
+        cwd = parent / "nested"
+        cwd.mkdir()
+        (cwd / ".env").write_text("REPLICATE_API_TOKEN=from-cwd\n")
+        old = os.getcwd()
+        try:
+            os.chdir(cwd)
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(gba._project_root().resolve(), cwd)
+        finally:
+            os.chdir(old)
+
+    def test_project_root_walks_to_parent_with_claude(self):
+        gba = _load_script()
+        parent = Path(tempfile.mkdtemp()).resolve()
+        (parent / ".claude").mkdir()
+        cwd = parent / "nested" / "deeper"
+        cwd.mkdir(parents=True)
+        old = os.getcwd()
+        try:
+            os.chdir(cwd)
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(gba._project_root().resolve(), parent)
+        finally:
+            os.chdir(old)
+
+    def test_project_root_skips_home_even_when_home_has_claude(self):
+        gba = _load_script()
+        home = Path(tempfile.mkdtemp()).resolve()
+        (home / ".claude" / "skills" / "meta-ads-static-creator").mkdir(parents=True)
+        (home / ".env").write_text("REPLICATE_API_TOKEN=from-home\nFAL_KEY=from-home\n")
+        nested = home / "Downloads"
+        nested.mkdir()
+        old = os.getcwd()
+        try:
+            os.chdir(nested)
+            env = {
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("CLAUDE_PROJECT_DIR", "REPLICATE_API_TOKEN", "FAL_KEY")
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                with mock.patch.object(
+                    gba, "_is_home", side_effect=lambda p: Path(p).resolve() == home
+                ):
+                    self.assertNotEqual(gba._project_root().resolve(), home)
+                    gba._load_env()
+                    self.assertIsNone(os.environ.get("REPLICATE_API_TOKEN"))
+                    self.assertIsNone(os.environ.get("FAL_KEY"))
+        finally:
+            os.chdir(old)
+
+    def test_load_env_refuses_home_root(self):
+        gba = _load_script()
+        home = Path(tempfile.mkdtemp()).resolve()
+        (home / ".env").write_text("REPLICATE_API_TOKEN=from-home\n")
+        env = {k: v for k, v in os.environ.items()}
+        env.pop("REPLICATE_API_TOKEN", None)
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(gba, "_project_root", return_value=home):
+                with mock.patch.object(gba, "_is_home", return_value=True):
+                    gba._load_env()
+                    self.assertIsNone(os.environ.get("REPLICATE_API_TOKEN"))
+
+
+class FalDownloadTests(unittest.TestCase):
+    def test_https_fal_media_ok(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(200, content=b"img")
+        ) as get:
+            data = fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertEqual(data, b"img")
+        self.assertEqual(get.call_args.kwargs.get("timeout"), 120)
+        self.assertNotIn("headers", get.call_args.kwargs)
+
+    def test_https_v3_fal_media_ok(self):
+        with mock.patch.object(fp.requests, "get", return_value=FakeResp(200, content=b"img")):
+            fp._download_output("https://v3.fal.media/files/x.png")
+
+    def test_https_fal_run_subdomain_ok(self):
+        with mock.patch.object(fp.requests, "get", return_value=FakeResp(200, content=b"img")):
+            fp._download_output("https://queue.fal.run/out.png")
+
+    def test_refuses_foreign_host(self):
+        with self.assertRaises(ProviderError) as cm:
+            fp._download_output("https://evil.example.com/x.png")
+        self.assertIn("unexpected host", str(cm.exception))
+
+    def test_refuses_http(self):
+        with self.assertRaises(ProviderError) as cm:
+            fp._download_output("http://fal.media/x.png")
+        self.assertIn("non-HTTPS", str(cm.exception))
 
 
 class CliEstimateTests(unittest.TestCase):

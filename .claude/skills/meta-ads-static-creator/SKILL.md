@@ -4,12 +4,13 @@ description: "Create reference-led static ads with editable copy: generate only 
 image_model: GPT Image 2.5 Sunburst
 group: Ads
 summary: Reference-led static ads with editable copy, paired mobile formats, and source-to-overlay approval gates
-version: 3.0.0
+version: 3.0.1
 outputs: [meta-ads-static-creator]
 inboxes:
   meta-ads-static-creator/ad-references: Ad references
 requires: [FAL_KEY | REPLICATE_API_TOKEN]
 optional: [intelligence/fonts/*.ttf — the brand's real typefaces; degrades to a described fallback face, Open Design desktop app + MCP]
+allowed-tools: Bash(python3 ${CLAUDE_SKILL_DIR}/*)
 metadata:
   author: "Joey Mulcahy"
   source: "https://joeymulcahy.com/"
@@ -24,13 +25,72 @@ Build an ad from two independent parts: a text-free photographic plate and an
 editable layout. Use this skill when the copy needs to be localised, tested or
 edited after delivery. Create its declared inbox and output folders before use.
 
+Call every bundled script through `${CLAUDE_SKILL_DIR}` (Claude Code substitutes
+the folder that contains this `SKILL.md`):
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/generate-blank-ad.py" …
+python3 "${CLAUDE_SKILL_DIR}/compose-text.py" …
+python3 "${CLAUDE_SKILL_DIR}/layers-to-html.py" …
+python3 "${CLAUDE_SKILL_DIR}/prepare-ratio-plate.py" …
+```
+
+## Bundled files, network and credentials
+
+These files ship with the skill. They are not separate downloads.
+
+- `generate-blank-ad.py` — `--estimate` prints provider, model, quality and cost
+  with no network. After approval it generates one text-free photographic plate.
+- `compose-text.py` — sets approved copy onto a plate in brand fonts. Writes the
+  PNG, the embedded-font SVG and `layers.json`. No network.
+- `layers-to-html.py` — turns `layers.json` into Open Design HTML (one 4:5 page,
+  one 9:16 page, a review board; `--wireframe` and `--preflight`). No network.
+- `prepare-ratio-plate.py` — builds a layout-first ratio plate from photography
+  already named in `spec.json`. No network; it never calls an image model.
+- `providers/__init__.py` — picks provider and quality from CLI, spec, env and
+  keys. Loads fal or Replicate. No silent cross-provider fallback.
+- `providers/replicate_provider.py` — raw HTTP client for
+  `openai/gpt-image-2.5-sunburst` on Replicate.
+- `providers/fal_provider.py` — `fal_client` wrapper for GPT Image 2.5 Sunburst
+  on fal.
+
+**Hosts.** Replicate uses `https://api.replicate.com/v1` for uploads, create,
+poll and delete. Output images are downloaded from `replicate.delivery` (and its
+subdomains). fal goes through `fal_client` (upload + run); output images are
+downloaded from fal CDN URLs on `fal.media` / `fal.run` hosts (including
+`v3.fal.media` and `v3b.fal.media`).
+
+**Keys.** The scripts read `FAL_KEY`, `REPLICATE_API_TOKEN` and `IMAGE_PROVIDER`
+from the project `.env` only (`$CLAUDE_PROJECT_DIR`, then the working directory,
+then a parent that contains `.claude`). They never read `~/.env`. They do not
+load any other env names from that file.
+
+**Token scope.** `REPLICATE_API_TOKEN` is sent as `Authorization: Bearer` to
+`api.replicate.com`. Output downloads start as a plain GET with no token; on
+HTTP 401 or 403 the token is sent again only to an allow-listed Replicate host.
+`FAL_KEY` is used by `fal_client` for fal's own API. Keys are not sent to any
+other host.
+
+**No shell.** The Python does not call `subprocess`, `os.system`, or a shell.
+
+**Deletes.** Replicate deletes only the Files API uploads from *this* run
+(`DELETE /v1/files/{id}`). It unlinks its own pending marker
+`.{label}-replicate-pending.txt` after a successful plate. If writing the local
+plate PNG fails after the bytes are on disk, `generate-blank-ad.py` unlinks that
+partial file. Nothing else is deleted.
+
+**Open Design.** Optional (see `optional:`). Drive it only through MCP file
+tools: `create_project`, `create_artifact`, `write_file`, `get_file`,
+`list_files`, `search_files`, `get_artifact`, `get_project`. Never call
+`start_run`, `get_run`, or `cancel_run`.
+
 ## Non-negotiables
 
 - Every run delivers two independently composed variants: **4:5** (1080×1350) and
   **9:16** (1080×1920). Never crop one finished design into the other.
 - All claims, offers and product facts must be supported by
   `brands/<brand>/intelligence/`. Do not infer them from the reference.
-- Before any paid call, run `generate-blank-ad.py … --estimate` for each plate
+- Before any paid call, run `python3 "${CLAUDE_SKILL_DIR}/generate-blank-ad.py" … --estimate` for each plate
   and state the provider, model, quality, exact plates, call count, base cost
   and maximum cost including one quality retry per failed plate. Get explicit
   approval. Replicate prices are per output image (input images free; checked
@@ -103,7 +163,7 @@ mix ingredients with founder facts, serving counts, offers or unrelated claims.
 
 Open Design is HTML-file based. There are no artboards. Make one fixed-size HTML
 page per ratio: **4:5 = 1080×1350**, **9:16 = 1080×1920**. Run
-`layers-to-html.py … --variant … --wireframe` from the spec (or write the same
+`python3 "${CLAUDE_SKILL_DIR}/layers-to-html.py" … --variant … --wireframe` from the spec (or write the same
 shape through MCP file tools). Each image zone is a placeholder box. Add the
 `od-hide-images` class so the layout still works with images hidden: hierarchy,
 lanes, UI, proof and CTA remain clear and editable.
@@ -157,7 +217,7 @@ Replicate is the default when both keys are set, or when no key is set. fal is
 used when only `FAL_KEY` is set. Never switch provider after approval without a
 fresh quote.
 
-Use `generate-blank-ad.py` once for each ratio. The prompt names the exact image
+Use `python3 "${CLAUDE_SKILL_DIR}/generate-blank-ad.py"` once for each ratio. The prompt names the exact image
 zone, crop, product/scale references and required clear space. Generate no ad copy,
 UI, rules, dots, labels or placeholder text; printed packaging is the only permitted
 text. End every prompt with: “Absolutely no typography anywhere except the printed
@@ -213,11 +273,11 @@ inside an already seamless approved image zone only, with CSS `object-fit` /
 
 ## 6. Compose editable overlays
 
-Run `compose-text.py` once per approved variant. It outputs a flattened PNG, an
+Run `python3 "${CLAUDE_SKILL_DIR}/compose-text.py"` once per approved variant. It outputs a flattened PNG, an
 embedded-font editable SVG and `layers.json` with rendered line bounds and baselines.
 Treat a shrink warning or a mobile-floor export block as a layout failure.
 
-Then run `layers-to-html.py` once per variant (and `--board` for the side-by-side
+Then run `python3 "${CLAUDE_SKILL_DIR}/layers-to-html.py"` once per variant (and `--board` for the side-by-side
 review file). It scales `layers.json` from plate pixels (for example 1152 wide)
 to 1080-wide delivery: **4:5 = 1080×1350**, **9:16 = 1080×1920**. Crop inside an
 approved image zone is CSS `object-fit` / `object-position`. Repeated components
@@ -236,14 +296,14 @@ size, leading, tracking, box dimensions, padding, rule weight and alignment
 across all instances.
 
 After the Open Design write gate, push the HTML, `od-fonts/` files and plate
-PNGs with `create_artifact` / `write_file`. The `compose-text.py` PNG is the
+PNGs with `create_artifact` / `write_file`. The PNG from `python3 "${CLAUDE_SKILL_DIR}/compose-text.py"` is the
 exact-size delivery master. The user exports from Open Design only after hand
 edits.
 
 ## 7. Final preflight
 
 Review each ratio at actual delivery scale and beside the reference. Open Design
-has no screenshot tool and no artboards. Run `layers-to-html.py … --preflight`
+has no screenshot tool and no artboards. Run `python3 "${CLAUDE_SKILL_DIR}/layers-to-html.py" … --preflight`
 on the scaled layer bounds, then give the user the Open Design `previewUrl`.
 The design is a draft, not a completed handoff, if any check fails:
 

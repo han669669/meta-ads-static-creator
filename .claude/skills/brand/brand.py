@@ -163,7 +163,7 @@ INTELLIGENCE_DIRS = (
 FRONTMATTER_KEYS = {
     "name", "description", "version", "group", "summary",
     "image_model", "video_model", "outputs", "inboxes", "requires", "optional",
-    "metadata",
+    "metadata", "allowed-tools",
 }
 
 

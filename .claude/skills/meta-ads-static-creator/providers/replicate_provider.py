@@ -6,6 +6,7 @@ in plan(); generate() is the paid path.
 Auth: REPLICATE_API_TOKEN as Authorization: Bearer. openai_api_key is never sent.
 Inputs: Replicate Files API (private), deleted after the run.
 Outputs: downloaded immediately; only from Replicate-owned hosts.
+Output GETs start without the API token; a 401/403 retries with the token.
 
 Sources (checked 2026-10-06):
   HTTP API ............ https://replicate.com/docs/reference/http
@@ -43,7 +44,10 @@ SYNC_WAIT_S = 60
 CANCEL_AFTER = "15m"
 POLL_EVERY_S = 2.0
 POLL_DEADLINE_S = 16 * 60
-OUTPUT_HOSTS = ("replicate.delivery", "replicate.com")
+# Output files: replicate.delivery and its subdomains. Authenticated Files API
+# URLs live on api.replicate.com. Do not allow the rest of replicate.com.
+OUTPUT_HOSTS = ("replicate.delivery", "api.replicate.com")
+POLL_URL_PREFIX = f"{API}/predictions/"
 
 # ratio -> (aspect_ratio enum value, crop_to). 4:5 is not native: generate
 # 1152x1536 (3:4) and centre-crop to 1152x1440. 9:16 is native at 1152x2048.
@@ -263,10 +267,26 @@ def _wait(
                 prediction_id=pred["id"],
             )
         time.sleep(POLL_EVERY_S)
-        r = _get(s, pred["urls"]["get"])
+        r = _get(s, _prediction_poll_url(pred))
         if r.ok:
             pred = r.json()
     return pred
+
+
+def _prediction_poll_url(pred: Dict[str, Any]) -> str:
+    """Poll only Replicate's predictions endpoint, never a caller-supplied host."""
+    url = (pred.get("urls") or {}).get("get") or ""
+    if not isinstance(url, str) or not url.startswith(POLL_URL_PREFIX):
+        raise ProviderError(
+            f"refusing to poll prediction at unexpected URL {url!r}; "
+            f"expected a URL starting with {POLL_URL_PREFIX}"
+        )
+    return url
+
+
+def _output_host_allowed(host: str) -> bool:
+    host = (host or "").lower()
+    return any(host == d or host.endswith("." + d) for d in OUTPUT_HOSTS)
 
 
 def _first_url(output: Any) -> Optional[str]:
@@ -287,9 +307,14 @@ def _download(s: requests.Session, url: str) -> bytes:
     if parsed.scheme != "https":
         raise ProviderError(f"refusing to download output from non-HTTPS URL ({parsed.scheme})")
     host = parsed.hostname or ""
-    if not any(host == d or host.endswith("." + d) for d in OUTPUT_HOSTS):
+    if not _output_host_allowed(host):
         raise ProviderError(f"refusing to download output from unexpected host {host}")
-    r = _get(s, url, timeout=120)
+    # replicate.delivery URLs are often public. The HTTP API still documents
+    # Authorization for some file URLs, so retry with the token only on 401/403
+    # and only after the host allow-list above.
+    r = requests.get(url, timeout=120)
+    if r.status_code in (401, 403):
+        r = _get(s, url, timeout=120)
     if not r.ok:
         raise ProviderError(
             f"output download failed: HTTP {r.status_code}. URLs expire after 1 hour.",
