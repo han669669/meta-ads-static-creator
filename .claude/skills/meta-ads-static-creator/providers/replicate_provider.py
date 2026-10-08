@@ -324,7 +324,11 @@ def _download(s: requests.Session, url: str) -> bytes:
         return _get_output(s if credentials else plain, u, timeout=timeout)
 
     url, r = fetch_output(
-        url, get=get, allowed=OUTPUT_HOSTS, fail=_output_fail
+        url,
+        get=get,
+        allowed=OUTPUT_HOSTS,
+        fail=_output_fail,
+        passthrough=(401, 403),
     )
     if r.status_code in (401, 403):
         url, r = fetch_output(
@@ -333,11 +337,6 @@ def _download(s: requests.Session, url: str) -> bytes:
             allowed=OUTPUT_HOSTS,
             fail=_output_fail,
             auth_host=hostname(url),
-        )
-    if not r.ok:
-        raise ProviderError(
-            f"output download failed: HTTP {r.status_code}. URLs expire after 1 hour.",
-            billed=True,
         )
     return r.content
 

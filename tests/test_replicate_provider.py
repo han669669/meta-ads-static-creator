@@ -492,6 +492,7 @@ class GenerateTests(unittest.TestCase):
             pred, plain_status=403
         )
         self.assertEqual(res.meta["prediction_id"], "p403")
+        self.assertEqual(len(plain_gets), 1)
         self.assertNotIn(
             "authorization", {k.lower() for k in plain_gets[0]["headers"]}
         )
@@ -729,6 +730,7 @@ class ReplicateOutputRedirectTests(unittest.TestCase):
         with mock.patch.object(rp, "_plain_session", return_value=plain):
             data = rp._download(auth, "https://replicate.delivery/x.png")
         self.assertEqual(data, b"img")
+        self.assertEqual(len(plain_gets), 2)
         self.assertIn("replicate.delivery", plain_gets[0]["url"])
         self.assertNotIn(
             "authorization", {k.lower() for k in plain_gets[0]["headers"]}
@@ -1021,6 +1023,43 @@ class FalDownloadTests(unittest.TestCase):
                 fp._download_output("https://v3b.fal.media/files/b/x/out.png")
         self.assertIn("empty Location", str(cm.exception))
         self.assertIs(cm.exception.billed, True)
+
+    def test_final_401_is_billed_provider_error(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(401)
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("HTTP 401", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_final_429_is_billed_provider_error(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(429)
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("HTTP 429", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_final_503_is_billed_provider_error(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(503)
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("HTTP 503", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_timeout_is_billed_provider_error(self):
+        with mock.patch.object(
+            fp.requests, "get", side_effect=requests.Timeout("timed out")
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("output download failed", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+        self.assertNotIsInstance(cm.exception, requests.RequestException)
 
 
 class CliEstimateTests(unittest.TestCase):

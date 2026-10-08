@@ -52,7 +52,8 @@ These files ship with the skill. They are not separate downloads.
 - `providers/_output.py` — HTTPS and host allow-list checks, Location
   resolution, and redirect chasing (5-hop cap) for output downloads. Providers
   pass their hosts, GET function, and billing. Credentials only on the same
-  allow-listed host. No network on import.
+  allow-listed host. A non-OK final response or a download timeout/connection
+  error is a billed failure. No network on import.
 - `providers/replicate_provider.py` — raw HTTP client for
   `openai/gpt-image-2.5-sunburst` on Replicate.
 - `providers/fal_provider.py` — `fal_client` wrapper for GPT Image 2.5 Sunburst

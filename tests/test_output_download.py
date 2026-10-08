@@ -5,6 +5,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import requests
+
 SKILL = Path(__file__).resolve().parents[1] / ".claude" / "skills" / "meta-ads-static-creator"
 sys.path.insert(0, str(SKILL))
 
@@ -232,6 +234,49 @@ class FetchOutputTests(unittest.TestCase):
         self.assertIn(f">{out.MAX_REDIRECTS}", str(cm.exception))
         self.assertIs(cm.exception.billed, True)
 
+    def test_non_ok_final_status_is_failed(self):
+        def get(url, *, credentials):
+            return FakeResp(503)
+
+        with self.assertRaises(ProviderError) as cm:
+            out.fetch_output(
+                "https://replicate.delivery/x.png",
+                get=get,
+                allowed=self.allowed,
+                fail=_fail,
+            )
+        self.assertIn("HTTP 503", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_passthrough_returns_401_without_failing(self):
+        def get(url, *, credentials):
+            return FakeResp(401)
+
+        url, r = out.fetch_output(
+            "https://replicate.delivery/x.png",
+            get=get,
+            allowed=self.allowed,
+            fail=_fail,
+            passthrough=(401, 403),
+        )
+        self.assertEqual(r.status_code, 401)
+        self.assertEqual(url, "https://replicate.delivery/x.png")
+
+    def test_timeout_is_failed(self):
+        def get(url, *, credentials):
+            raise requests.Timeout("timed out")
+
+        with self.assertRaises(ProviderError) as cm:
+            out.fetch_output(
+                "https://replicate.delivery/x.png",
+                get=get,
+                allowed=self.allowed,
+                fail=_fail,
+            )
+        self.assertIn("output download failed", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
 
 if __name__ == "__main__":
     unittest.main()
+

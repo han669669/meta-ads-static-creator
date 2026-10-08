@@ -8,7 +8,8 @@ only for the same allow-listed host that was authenticated (`auth_host`).
 Used after the paid generate: Replicate downloads only once a prediction
 has succeeded, and fal downloads only once `fal_client.run` has returned
 an image URL. Failures raised through `fail` should be `billed=True` —
-including an empty redirect `Location` — because the generation has
+including an empty redirect `Location`, a non-OK final response, and a
+timeout or connection error from `get` — because the generation has
 already happened.
 
 No network on import. `get` must not follow redirects.
@@ -17,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, NoReturn, Optional, Sequence, Tuple
 from urllib.parse import urljoin, urlparse
+
+import requests
 
 MAX_REDIRECTS = 5
 REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
@@ -62,6 +65,17 @@ def credentials_allowed_for_hop(
     return host_allowed(host, allowed)
 
 
+def _is_ok(response: Any) -> bool:
+    return 200 <= int(response.status_code) < 300
+
+
+def _call_get(get: Get, url: str, *, credentials: bool, fail: Fail) -> Any:
+    try:
+        return get(url, credentials=credentials)
+    except requests.RequestException as exc:
+        fail(f"output download failed: {exc}")
+
+
 def fetch_output(
     url: str,
     *,
@@ -70,18 +84,26 @@ def fetch_output(
     fail: Fail,
     auth_host: Optional[str] = None,
     max_hops: int = MAX_REDIRECTS,
+    passthrough: Sequence[int] = (),
 ) -> Tuple[str, Any]:
     """GET `url`, then follow 3xx hops with HTTPS + allow-list checks.
 
     Each hop calls `get(url, credentials=...)`. Credentials are True only
     when `auth_host` is set and the hop is that same allow-listed host.
+
+    A non-OK final status is passed to `fail`, except statuses in
+    `passthrough` (Replicate uses 401/403 so it can retry with the token).
+    `requests.RequestException` from `get` (timeout, connection error) is
+    also passed to `fail`.
     """
     check_output_url(url, allowed, fail=fail)
-    r = get(
+    r = _call_get(
+        get,
         url,
         credentials=credentials_allowed_for_hop(
             url, auth_host=auth_host, allowed=allowed
         ),
+        fail=fail,
     )
     hops = 0
     while r.status_code in REDIRECT_STATUS:
@@ -90,11 +112,15 @@ def fetch_output(
             fail(f"too many redirects while downloading output (>{max_hops})")
         nxt = redirect_target(url, r.headers.get("Location") or "", fail=fail)
         check_output_url(nxt, allowed, fail=fail)
-        r = get(
+        r = _call_get(
+            get,
             nxt,
             credentials=credentials_allowed_for_hop(
                 nxt, auth_host=auth_host, allowed=allowed
             ),
+            fail=fail,
         )
         url = nxt
+    if r.status_code not in passthrough and not _is_ok(r):
+        fail(f"output download failed: HTTP {r.status_code}")
     return url, r

@@ -88,7 +88,6 @@ def _download_output(url: str) -> bytes:
     _url, r = fetch_output(
         url, get=get, allowed=OUTPUT_HOSTS, fail=_output_fail
     )
-    r.raise_for_status()
     return r.content
 
 
