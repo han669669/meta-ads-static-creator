@@ -9,15 +9,22 @@ Schema: https://fal.ai/models/openai/gpt-image-2.5/sunburst/edit/api
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import NoReturn, Optional
+
+import requests
 
 from . import Plan, PlateRequest, PlateResult, ProviderError, QUALITIES
+from ._output import fetch_output
 
 NAME = "fal"
 ENV_KEY = "FAL_KEY"
 EDIT_MODEL = "openai/gpt-image-2.5/sunburst/edit"
 TXT2IMG_MODEL = "openai/gpt-image-2.5/sunburst/text-to-image"
 DEFAULT_MODEL = EDIT_MODEL
+
+# Output CDN: v3b.fal.media (documented URL form), v3.fal.media / fal.media
+# (SDK upload fallbacks), and fal.run app hosts. Subdomains of each are allowed.
+OUTPUT_HOSTS = ("fal.media", "fal.run")
 
 SIZE = {
     "1:1": (1024, 1024),
@@ -67,6 +74,24 @@ def plan(req: PlateRequest) -> Plan:
     )
 
 
+def _output_fail(message: str, *, status: Optional[int] = None) -> NoReturn:
+    # fal_client.run has already succeeded when we download, so a broken
+    # redirect or refused host is billed — same as "no image returned".
+    # fal CDN URLs have no 1-hour expiry; status is accepted and ignored.
+    raise ProviderError(message, billed=True)
+
+
+def _download_output(url: str) -> bytes:
+    def get(u: str, *, credentials: bool) -> requests.Response:
+        # Output CDN GETs never send FAL_KEY; credentials stays unused by design.
+        return requests.get(u, timeout=120, allow_redirects=False)
+
+    _url, r = fetch_output(
+        url, get=get, allowed=OUTPUT_HOSTS, fail=_output_fail
+    )
+    return r.content
+
+
 def generate(
     req: PlateRequest, p: Plan, resume_id: Optional[str] = None
 ) -> PlateResult:
@@ -76,7 +101,6 @@ def generate(
         )
     try:
         import fal_client
-        import requests
     except ImportError as exc:  # pragma: no cover
         raise ProviderError(
             f"missing dependency '{exc.name}'. pip install -r requirements.txt"
@@ -95,6 +119,5 @@ def generate(
     img = (res.get("images") or [{}])[0].get("url")
     if not img:
         raise ProviderError("no image returned from FAL.", billed=True)
-    r = requests.get(img, timeout=120)
-    r.raise_for_status()
-    return PlateResult(data=r.content, provider=NAME, model=p.model, meta={"url": img})
+    data = _download_output(img)
+    return PlateResult(data=data, provider=NAME, model=p.model, meta={"url": img})

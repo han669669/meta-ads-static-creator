@@ -60,21 +60,53 @@ def _arg(flag, default=None):
     return sys.argv[i + 1]
 
 
+def _is_home(path: Path) -> bool:
+    try:
+        return path.resolve() == Path.home().resolve()
+    except (OSError, RuntimeError):
+        return False
+
+
 def _project_root() -> Path:
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if parent.name == ".claude":
-            return parent.parent
-    return Path.cwd()
+    """Directory that holds the project .env.
+
+    Prefer $CLAUDE_PROJECT_DIR, then the current working directory, then a
+    parent of cwd that contains a .claude folder. Never the user's home
+    directory: a skill installed under ~/.claude must not load ~/.env.
+    """
+    env_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    if env_dir:
+        root = Path(env_dir).expanduser()
+        if not _is_home(root):
+            return root
+
+    cwd = Path.cwd()
+    if not _is_home(cwd) and ((cwd / ".env").is_file() or (cwd / ".claude").is_dir()):
+        return cwd
+
+    try:
+        start = cwd.resolve()
+    except OSError:
+        start = cwd
+    for parent in [start, *start.parents]:
+        if _is_home(parent):
+            continue
+        if (parent / ".claude").is_dir():
+            return parent
+    return cwd
 
 
 def _load_env():
-    """Load allow-listed keys from the project-root .env only.
+    """Fill missing allow-listed keys from the project-root .env.
 
-    Does not walk parent folders, does not load non-allow-listed keys, and
-    never overrides variables already set in the environment.
+    Process environment values already set win (setdefault). Does not walk
+    parent folders for extra .env files, does not load non-allow-listed keys,
+    and never reads ~/.env.
     """
-    env_path = _project_root() / ".env"
+    root = _project_root()
+    if _is_home(root):
+        return
+    env_path = root / ".env"
     if not env_path.is_file():
         return
     for line in env_path.read_text().splitlines():

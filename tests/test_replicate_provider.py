@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import requests
 from PIL import Image
 
 SKILL = Path(__file__).resolve().parents[1] / ".claude" / "skills" / "meta-ads-static-creator"
@@ -50,6 +51,26 @@ def _load_script():
     return mod
 
 
+def _record_gets(session, handler):
+    """Replace session.get while keeping Session.headers on each recorded call."""
+    recorded = []
+
+    def get(url, **kw):
+        headers = {**dict(session.headers), **(kw.get("headers") or {})}
+        recorded.append(
+            {
+                "url": url,
+                "headers": headers,
+                "allow_redirects": kw.get("allow_redirects"),
+                "timeout": kw.get("timeout"),
+            }
+        )
+        return handler(url, kw, headers)
+
+    session.get = get
+    return recorded
+
+
 class FakeResp:
     def __init__(self, status, body=None, content=b"", headers=None):
         self.status_code = status
@@ -63,6 +84,10 @@ class FakeResp:
         if self._body is None:
             raise ValueError("no json")
         return self._body
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise RuntimeError(f"HTTP {self.status_code}")
 
 
 class PlanTests(unittest.TestCase):
@@ -199,12 +224,26 @@ class GenerateTests(unittest.TestCase):
         seq = iter(polls)
 
         def get(url, **kw):
-            if "replicate.delivery" in url:
+            # Authenticated retry path. The first output GET uses _plain_session.
+            if download is not None and (
+                "replicate.delivery" in url or url.startswith("https://api.replicate.com/v1/files/")
+            ):
                 return download
             return next(seq)
 
         s.get.side_effect = get
         return s
+
+    def _run_generate(self, s, *, download=None, resume_id=None, req=None):
+        if download is None:
+            download = FakeResp(200, content=_png_bytes((64, 64)))
+        req = req or self.req
+        plain = rp._plain_session()
+        plain.get = mock.Mock(return_value=download)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with mock.patch.object(rp, "_plain_session", return_value=plain):
+                self.plain = plain
+                return rp.generate(req, rp.plan(req), resume_id=resume_id)
 
     def test_happy_path_with_polling(self):
         pred = {
@@ -225,11 +264,21 @@ class GenerateTests(unittest.TestCase):
         s = self._session(
             FakeResp(201, pred),
             [FakeResp(200, dict(pred, status="processing")), FakeResp(200, done)],
-            FakeResp(200, content=_png_bytes((1152, 2048))),
+            None,
         )
-        with mock.patch.object(rp, "_session", return_value=s):
-            res = rp.generate(self.req, rp.plan(self.req))
+        res = self._run_generate(
+            s, download=FakeResp(200, content=_png_bytes((1152, 2048)))
+        )
         self.assertEqual(res.meta["prediction_id"], "p1")
+        self.plain.get.assert_called()
+        self.assertEqual(self.plain.get.call_args.kwargs.get("timeout"), 120)
+        self.assertEqual(self.plain.get.call_args.kwargs.get("allow_redirects"), False)
+        self.assertNotIn("Authorization", self.plain.get.call_args.kwargs.get("headers") or {})
+        self.assertNotIn("Authorization", dict(self.plain.headers))
+        delivery_gets = [
+            c for c in s.get.call_args_list if c.args and "replicate.delivery" in c.args[0]
+        ]
+        self.assertEqual(len(delivery_gets), 0)
         self.assertEqual(
             self.sent["input"]["input_images"],
             ["https://api.replicate.com/v1/files/f0", "https://api.replicate.com/v1/files/f1"],
@@ -308,9 +357,8 @@ class GenerateTests(unittest.TestCase):
                 return FakeResp(429, {"detail": "throttled"}, headers={"Retry-After": "0"})
             return FakeResp(201, pred)
 
-        s = self._session(create_resp, [], FakeResp(200, content=_png_bytes((64, 64))))
-        with mock.patch.object(rp, "_session", return_value=s):
-            res = rp.generate(self.req, rp.plan(self.req))
+        s = self._session(create_resp, [], None)
+        res = self._run_generate(s)
         self.assertEqual(res.meta["prediction_id"], "p429")
         creates = [c for c in s.post.call_args_list if c.args[0].endswith("/predictions")]
         self.assertEqual(len(creates), 2)
@@ -342,6 +390,170 @@ class GenerateTests(unittest.TestCase):
                 rp.generate(self.req, rp.plan(self.req))
         self.assertIn("non-HTTPS", str(cm.exception))
 
+    def test_refuses_replicate_com_apex(self):
+        pred = {
+            "id": "p3c",
+            "status": "succeeded",
+            "output": ["https://replicate.com/static/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p3c"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with self.assertRaises(ProviderError) as cm:
+                rp.generate(self.req, rp.plan(self.req))
+        self.assertIn("unexpected host", str(cm.exception))
+
+    def test_allows_replicate_delivery_subdomain(self):
+        pred = {
+            "id": "p-sub",
+            "status": "succeeded",
+            "output": ["https://pbxt.replicate.delivery/xezq/abc/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p-sub"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        res = self._run_generate(s)
+        self.assertEqual(res.meta["prediction_id"], "p-sub")
+        self.assertEqual(
+            self.plain.get.call_args.args[0],
+            "https://pbxt.replicate.delivery/xezq/abc/out.png",
+        )
+
+    def _generate_with_real_auth_session(self, pred, *, plain_status):
+        """Keep _session() header setup; mock only the transport."""
+        s = rp._session()
+        self.assertEqual(s.headers.get("Authorization"), "Bearer r8_test_not_real")
+        file_n = iter(range(100))
+
+        def post(url, **kw):
+            if url.endswith("/files"):
+                n = next(file_n)
+                return FakeResp(
+                    201,
+                    {"id": f"f{n}", "urls": {"get": f"https://api.replicate.com/v1/files/f{n}"}},
+                )
+            self.sent = kw["json"]
+            self.sent_headers = kw["headers"]
+            return FakeResp(201, pred)
+
+        s.post = post
+        s.delete = mock.MagicMock()
+        png = FakeResp(200, content=_png_bytes((64, 64)))
+
+        def auth_handler(url, _kw, _headers):
+            if "replicate.delivery" in url:
+                return png
+            return FakeResp(200, pred)
+
+        auth_gets = _record_gets(s, auth_handler)
+        plain = rp._plain_session()
+        self.assertIsNone(
+            next(
+                (v for k, v in dict(plain.headers).items() if k.lower() == "authorization"),
+                None,
+            )
+        )
+        plain_gets = _record_gets(plain, lambda _url, _kw, _headers: FakeResp(plain_status))
+        with mock.patch.object(rp, "_session", return_value=s):
+            with mock.patch.object(rp, "_plain_session", return_value=plain):
+                res = rp.generate(self.req, rp.plan(self.req))
+        return res, plain_gets, auth_gets
+
+    def test_download_retries_with_token_on_401(self):
+        pred = {
+            "id": "p401",
+            "status": "succeeded",
+            "output": ["https://replicate.delivery/xezq/abc/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p401"},
+        }
+        res, plain_gets, auth_gets = self._generate_with_real_auth_session(
+            pred, plain_status=401
+        )
+        self.assertEqual(res.meta["prediction_id"], "p401")
+        self.assertEqual(len(plain_gets), 1)
+        self.assertNotIn(
+            "authorization", {k.lower() for k in plain_gets[0]["headers"]}
+        )
+        self.assertEqual(plain_gets[0]["allow_redirects"], False)
+        delivery_auth = [g for g in auth_gets if "replicate.delivery" in g["url"]]
+        self.assertEqual(len(delivery_auth), 1)
+        self.assertEqual(
+            delivery_auth[0]["headers"].get("Authorization"), "Bearer r8_test_not_real"
+        )
+        self.assertEqual(delivery_auth[0]["allow_redirects"], False)
+
+    def test_download_retries_with_token_on_403(self):
+        pred = {
+            "id": "p403",
+            "status": "succeeded",
+            "output": ["https://replicate.delivery/xezq/abc/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p403"},
+        }
+        res, plain_gets, auth_gets = self._generate_with_real_auth_session(
+            pred, plain_status=403
+        )
+        self.assertEqual(res.meta["prediction_id"], "p403")
+        self.assertEqual(len(plain_gets), 1)
+        self.assertNotIn(
+            "authorization", {k.lower() for k in plain_gets[0]["headers"]}
+        )
+        delivery_auth = [g for g in auth_gets if "replicate.delivery" in g["url"]]
+        self.assertEqual(len(delivery_auth), 1)
+        self.assertEqual(
+            delivery_auth[0]["headers"].get("Authorization"), "Bearer r8_test_not_real"
+        )
+
+    def test_unauth_download_retries_429(self):
+        pred = {
+            "id": "p429dl",
+            "status": "succeeded",
+            "output": ["https://replicate.delivery/xezq/abc/out.png"],
+            "urls": {"get": "https://api.replicate.com/v1/predictions/p429dl"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        png = _png_bytes((64, 64))
+        plain = rp._plain_session()
+        plain.get = mock.Mock(
+            side_effect=[
+                FakeResp(429, headers={"Retry-After": "0"}),
+                FakeResp(200, content=png),
+            ]
+        )
+        with mock.patch.object(rp, "_session", return_value=s):
+            with mock.patch.object(rp, "_plain_session", return_value=plain):
+                res = rp.generate(self.req, rp.plan(self.req))
+        self.assertEqual(res.meta["prediction_id"], "p429dl")
+        self.assertEqual(plain.get.call_count, 2)
+        for call in plain.get.call_args_list:
+            self.assertEqual(call.kwargs.get("allow_redirects"), False)
+            self.assertNotIn("Authorization", dict(plain.headers))
+
+    def test_poll_url_must_be_predictions_api(self):
+        pred = {
+            "id": "p-evil",
+            "status": "starting",
+            "output": None,
+            "urls": {"get": "https://evil.example.com/steal"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with self.assertRaises(ProviderError) as cm:
+                rp.generate(self.req, rp.plan(self.req))
+        self.assertIn("unexpected URL", str(cm.exception))
+        self.assertIn("https://api.replicate.com/v1/predictions/", str(cm.exception))
+
+    def test_poll_url_rejects_files_endpoint(self):
+        pred = {
+            "id": "p-files",
+            "status": "starting",
+            "output": None,
+            "urls": {"get": "https://api.replicate.com/v1/files/f1"},
+        }
+        s = self._session(FakeResp(201, pred), [], None)
+        with mock.patch.object(rp, "_session", return_value=s):
+            with self.assertRaises(ProviderError) as cm:
+                rp.generate(self.req, rp.plan(self.req))
+        self.assertIn("unexpected URL", str(cm.exception))
+
     def test_resume_skips_create_and_upload(self):
         pred = {
             "id": "p-resume",
@@ -350,19 +562,13 @@ class GenerateTests(unittest.TestCase):
             "urls": {"get": "https://api.replicate.com/v1/predictions/p-resume"},
         }
         s = mock.MagicMock()
-        s.get.side_effect = [
-            FakeResp(200, pred),
-            FakeResp(200, content=_png_bytes((64, 64))),
-        ]
-        with mock.patch.object(rp, "_session", return_value=s):
-            res = rp.generate(self.req, rp.plan(self.req), resume_id="p-resume")
+        s.get.return_value = FakeResp(200, pred)
+        res = self._run_generate(s, resume_id="p-resume")
         self.assertEqual(res.meta["prediction_id"], "p-resume")
         s.post.assert_not_called()
         s.delete.assert_not_called()
 
     def test_timeout_resumes_listed_prediction(self):
-        import requests
-
         plan = rp.plan(self.req)
         pred = {
             "id": "p-found",
@@ -385,18 +591,189 @@ class GenerateTests(unittest.TestCase):
             raise requests.Timeout("create timed out")
 
         def get(url, **kw):
-            if "replicate.delivery" in url:
-                return FakeResp(200, content=_png_bytes((64, 64)))
             if url.rstrip("/").endswith("/predictions"):
                 return FakeResp(200, {"results": [pred]})
             return FakeResp(200, pred)
 
         s.post.side_effect = post
         s.get.side_effect = get
-        with mock.patch.object(rp, "_session", return_value=s):
-            res = rp.generate(self.req, plan)
+        plain = rp._plain_session()
+        plain.get = mock.Mock(return_value=FakeResp(200, content=_png_bytes((64, 64))))
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            with mock.patch.object(rp, "_session", return_value=s):
+                res = rp.generate(self.req, plan)
         self.assertEqual(res.meta["prediction_id"], "p-found")
         self.assertEqual(s.delete.call_count, 2)
+
+
+class ReplicateOutputRedirectTests(unittest.TestCase):
+    def setUp(self):
+        os.environ["REPLICATE_API_TOKEN"] = "r8_test_not_real"
+        self.sleep = mock.patch.object(rp.time, "sleep")
+        self.sleep.start()
+        self.addCleanup(self.sleep.stop)
+
+    def _auth(self):
+        return rp._session()
+
+    def test_refuses_redirect_to_foreign_host(self):
+        plain = rp._plain_session()
+        _record_gets(
+            plain,
+            lambda _url, _kw, _headers: FakeResp(
+                302, headers={"Location": "https://evil.example.com/x.png"}
+            ),
+        )
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            with self.assertRaises(ProviderError) as cm:
+                rp._download(self._auth(), "https://replicate.delivery/x.png")
+        self.assertIn("unexpected host", str(cm.exception))
+        self.assertIn("evil.example.com", str(cm.exception))
+
+    def test_refuses_http_redirect(self):
+        plain = rp._plain_session()
+        _record_gets(
+            plain,
+            lambda _url, _kw, _headers: FakeResp(
+                302, headers={"Location": "http://replicate.delivery/x.png"}
+            ),
+        )
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            with self.assertRaises(ProviderError) as cm:
+                rp._download(self._auth(), "https://replicate.delivery/x.png")
+        self.assertIn("non-HTTPS", str(cm.exception))
+
+    def test_follows_relative_redirect_on_same_host(self):
+        png = b"img-bytes"
+        plain = rp._plain_session()
+
+        def handler(url, _kw, _headers):
+            if url.endswith("/x.png"):
+                return FakeResp(302, headers={"Location": "/y.png"})
+            return FakeResp(200, content=png)
+
+        gets = _record_gets(plain, handler)
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            data = rp._download(self._auth(), "https://replicate.delivery/x.png")
+        self.assertEqual(data, png)
+        self.assertEqual(gets[1]["url"], "https://replicate.delivery/y.png")
+        self.assertTrue(all(g["allow_redirects"] is False for g in gets))
+
+    def test_too_many_redirects(self):
+        plain = rp._plain_session()
+        _record_gets(
+            plain,
+            lambda _url, _kw, _headers: FakeResp(
+                302, headers={"Location": "https://replicate.delivery/next.png"}
+            ),
+        )
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            with self.assertRaises(ProviderError) as cm:
+                rp._download(self._auth(), "https://replicate.delivery/start.png")
+        self.assertIn("too many redirects", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_empty_location(self):
+        plain = rp._plain_session()
+        _record_gets(plain, lambda _url, _kw, _headers: FakeResp(302, headers={}))
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            with self.assertRaises(ProviderError) as cm:
+                rp._download(self._auth(), "https://replicate.delivery/x.png")
+        self.assertIn("empty Location", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_auth_retry_keeps_token_on_same_host_redirect(self):
+        auth = self._auth()
+
+        def auth_handler(url, _kw, _headers):
+            if url.endswith("/x.png"):
+                return FakeResp(
+                    302, headers={"Location": "https://replicate.delivery/y.png"}
+                )
+            return FakeResp(200, content=b"img")
+
+        auth_gets = _record_gets(auth, auth_handler)
+        plain = rp._plain_session()
+        plain_gets = _record_gets(plain, lambda _url, _kw, _headers: FakeResp(401))
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            data = rp._download(auth, "https://replicate.delivery/x.png")
+        self.assertEqual(data, b"img")
+        self.assertEqual(len(plain_gets), 1)
+        self.assertNotIn(
+            "authorization", {k.lower() for k in plain_gets[0]["headers"]}
+        )
+        self.assertEqual(len(auth_gets), 2)
+        for g in auth_gets:
+            self.assertEqual(
+                g["headers"].get("Authorization"), "Bearer r8_test_not_real"
+            )
+            self.assertEqual(g["allow_redirects"], False)
+
+    def test_auth_retry_drops_token_when_host_changes(self):
+        auth = self._auth()
+        auth_gets = _record_gets(
+            auth,
+            lambda url, _kw, _headers: FakeResp(
+                302, headers={"Location": "https://api.replicate.com/v1/files/f1"}
+            )
+            if "replicate.delivery" in url
+            else FakeResp(200, content=b"should-not-use-auth"),
+        )
+        plain = rp._plain_session()
+
+        def handler(url, _kw, _headers):
+            if "replicate.delivery" in url:
+                return FakeResp(401)
+            return FakeResp(200, content=b"img")
+
+        plain_gets = _record_gets(plain, handler)
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            data = rp._download(auth, "https://replicate.delivery/x.png")
+        self.assertEqual(data, b"img")
+        self.assertEqual(len(plain_gets), 2)
+        self.assertIn("replicate.delivery", plain_gets[0]["url"])
+        self.assertNotIn(
+            "authorization", {k.lower() for k in plain_gets[0]["headers"]}
+        )
+        self.assertIn("api.replicate.com", plain_gets[1]["url"])
+        self.assertNotIn(
+            "authorization", {k.lower() for k in plain_gets[1]["headers"]}
+        )
+        self.assertEqual(plain_gets[1]["allow_redirects"], False)
+        auth_delivery = [g for g in auth_gets if "replicate.delivery" in g["url"]]
+        self.assertEqual(len(auth_delivery), 1)
+        self.assertEqual(
+            auth_delivery[0]["headers"].get("Authorization"), "Bearer r8_test_not_real"
+        )
+        self.assertEqual(
+            [g for g in auth_gets if "api.replicate.com" in g["url"]], []
+        )
+
+    def _download_http_status(self, status: int) -> ProviderError:
+        auth = self._auth()
+        _record_gets(auth, lambda _url, _kw, _headers: FakeResp(status))
+        plain = rp._plain_session()
+        _record_gets(plain, lambda _url, _kw, _headers: FakeResp(status))
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
+            with self.assertRaises(ProviderError) as cm:
+                rp._download(auth, "https://replicate.delivery/x.png")
+        return cm.exception
+
+    def test_4xx_includes_expiry_hint(self):
+        for status in (401, 403, 404, 410):
+            with self.subTest(status=status):
+                err = self._download_http_status(status)
+                self.assertEqual(
+                    str(err),
+                    f"output download failed: HTTP {status}. URLs expire after 1 hour.",
+                )
+                self.assertIs(err.billed, True)
+
+    def test_5xx_does_not_include_expiry_hint(self):
+        err = self._download_http_status(503)
+        self.assertEqual(str(err), "output download failed: HTTP 503")
+        self.assertNotIn("URLs expire after 1 hour.", str(err))
+        self.assertIs(err.billed, True)
 
 
 class ResolveTests(unittest.TestCase):
@@ -482,6 +859,237 @@ class EnvLoadTests(unittest.TestCase):
             with mock.patch.object(gba, "_project_root", return_value=tmp):
                 gba._load_env()
                 self.assertEqual(os.environ["REPLICATE_API_TOKEN"], "already-set")
+
+    def test_project_root_prefers_claude_project_dir(self):
+        gba = _load_script()
+        project = Path(tempfile.mkdtemp()).resolve()
+        cwd = Path(tempfile.mkdtemp()).resolve()
+        (cwd / ".claude").mkdir()
+        old = os.getcwd()
+        try:
+            os.chdir(cwd)
+            with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(project)}):
+                self.assertEqual(gba._project_root().resolve(), project)
+        finally:
+            os.chdir(old)
+
+    def test_project_root_uses_cwd_when_it_has_env(self):
+        gba = _load_script()
+        parent = Path(tempfile.mkdtemp()).resolve()
+        (parent / ".claude").mkdir()
+        cwd = parent / "nested"
+        cwd.mkdir()
+        (cwd / ".env").write_text("REPLICATE_API_TOKEN=from-cwd\n")
+        old = os.getcwd()
+        try:
+            os.chdir(cwd)
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(gba._project_root().resolve(), cwd)
+        finally:
+            os.chdir(old)
+
+    def test_project_root_walks_to_parent_with_claude(self):
+        gba = _load_script()
+        parent = Path(tempfile.mkdtemp()).resolve()
+        (parent / ".claude").mkdir()
+        cwd = parent / "nested" / "deeper"
+        cwd.mkdir(parents=True)
+        old = os.getcwd()
+        try:
+            os.chdir(cwd)
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(gba._project_root().resolve(), parent)
+        finally:
+            os.chdir(old)
+
+    def test_project_root_skips_home_even_when_home_has_claude(self):
+        gba = _load_script()
+        home = Path(tempfile.mkdtemp()).resolve()
+        (home / ".claude" / "skills" / "meta-ads-static-creator").mkdir(parents=True)
+        (home / ".env").write_text("REPLICATE_API_TOKEN=from-home\nFAL_KEY=from-home\n")
+        nested = home / "Downloads"
+        nested.mkdir()
+        old = os.getcwd()
+        try:
+            os.chdir(nested)
+            env = {
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("CLAUDE_PROJECT_DIR", "REPLICATE_API_TOKEN", "FAL_KEY")
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                with mock.patch.object(
+                    gba, "_is_home", side_effect=lambda p: Path(p).resolve() == home
+                ):
+                    self.assertNotEqual(gba._project_root().resolve(), home)
+                    gba._load_env()
+                    self.assertIsNone(os.environ.get("REPLICATE_API_TOKEN"))
+                    self.assertIsNone(os.environ.get("FAL_KEY"))
+        finally:
+            os.chdir(old)
+
+    def test_load_env_refuses_home_root(self):
+        gba = _load_script()
+        home = Path(tempfile.mkdtemp()).resolve()
+        (home / ".env").write_text("REPLICATE_API_TOKEN=from-home\n")
+        env = {k: v for k, v in os.environ.items()}
+        env.pop("REPLICATE_API_TOKEN", None)
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(gba, "_project_root", return_value=home):
+                with mock.patch.object(gba, "_is_home", return_value=True):
+                    gba._load_env()
+                    self.assertIsNone(os.environ.get("REPLICATE_API_TOKEN"))
+
+    def test_is_home_catches_runtime_error_from_path_home(self):
+        gba = _load_script()
+        with mock.patch.object(
+            gba.Path, "home", side_effect=RuntimeError("no home directory")
+        ):
+            self.assertFalse(gba._is_home(Path("/tmp")))
+
+
+class FalDownloadTests(unittest.TestCase):
+    def test_https_fal_media_ok(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(200, content=b"img")
+        ) as get:
+            data = fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertEqual(data, b"img")
+        self.assertEqual(get.call_args.kwargs.get("timeout"), 120)
+        self.assertEqual(get.call_args.kwargs.get("allow_redirects"), False)
+        self.assertNotIn("headers", get.call_args.kwargs)
+
+    def test_https_v3_fal_media_ok(self):
+        with mock.patch.object(fp.requests, "get", return_value=FakeResp(200, content=b"img")):
+            fp._download_output("https://v3.fal.media/files/x.png")
+
+    def test_https_fal_run_subdomain_ok(self):
+        with mock.patch.object(fp.requests, "get", return_value=FakeResp(200, content=b"img")):
+            fp._download_output("https://queue.fal.run/out.png")
+
+    def test_refuses_foreign_host(self):
+        with self.assertRaises(ProviderError) as cm:
+            fp._download_output("https://evil.example.com/x.png")
+        self.assertIn("unexpected host", str(cm.exception))
+
+    def test_refuses_http(self):
+        with self.assertRaises(ProviderError) as cm:
+            fp._download_output("http://fal.media/x.png")
+        self.assertIn("non-HTTPS", str(cm.exception))
+
+    def test_follows_https_redirect_on_allowlisted_host(self):
+        hops = [
+            FakeResp(302, headers={"Location": "https://v3.fal.media/files/out.png"}),
+            FakeResp(200, content=b"img"),
+        ]
+        with mock.patch.object(fp.requests, "get", side_effect=hops) as get:
+            data = fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertEqual(data, b"img")
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(
+            get.call_args_list[1].args[0], "https://v3.fal.media/files/out.png"
+        )
+        for call in get.call_args_list:
+            self.assertEqual(call.kwargs.get("allow_redirects"), False)
+
+    def test_follows_relative_redirect(self):
+        hops = [
+            FakeResp(302, headers={"Location": "/files/out.png"}),
+            FakeResp(200, content=b"img"),
+        ]
+        with mock.patch.object(fp.requests, "get", side_effect=hops) as get:
+            data = fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertEqual(data, b"img")
+        self.assertEqual(get.call_args_list[1].args[0], "https://v3b.fal.media/files/out.png")
+
+    def test_refuses_redirect_to_foreign_host(self):
+        with mock.patch.object(
+            fp.requests,
+            "get",
+            return_value=FakeResp(
+                302, headers={"Location": "https://evil.example.com/x.png"}
+            ),
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("unexpected host", str(cm.exception))
+
+    def test_refuses_http_redirect(self):
+        with mock.patch.object(
+            fp.requests,
+            "get",
+            return_value=FakeResp(
+                302, headers={"Location": "http://fal.media/x.png"}
+            ),
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("non-HTTPS", str(cm.exception))
+
+    def test_too_many_redirects(self):
+        with mock.patch.object(
+            fp.requests,
+            "get",
+            return_value=FakeResp(
+                302, headers={"Location": "https://v3.fal.media/next.png"}
+            ),
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/start.png")
+        self.assertIn("too many redirects", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_empty_location(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(302, headers={})
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("empty Location", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_final_401_is_billed_provider_error(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(401)
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("HTTP 401", str(cm.exception))
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_final_429_is_billed_provider_error(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(429)
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("HTTP 429", str(cm.exception))
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_final_503_is_billed_provider_error(self):
+        with mock.patch.object(
+            fp.requests, "get", return_value=FakeResp(503)
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("HTTP 503", str(cm.exception))
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+
+    def test_timeout_is_billed_provider_error(self):
+        with mock.patch.object(
+            fp.requests, "get", side_effect=requests.Timeout("timed out")
+        ):
+            with self.assertRaises(ProviderError) as cm:
+                fp._download_output("https://v3b.fal.media/files/b/x/out.png")
+        self.assertIn("output download failed", str(cm.exception))
+        self.assertNotIn("URLs expire after 1 hour.", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
+        self.assertNotIsInstance(cm.exception, requests.RequestException)
 
 
 class CliEstimateTests(unittest.TestCase):
