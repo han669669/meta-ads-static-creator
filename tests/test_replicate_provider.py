@@ -670,6 +670,7 @@ class ReplicateOutputRedirectTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as cm:
                 rp._download(self._auth(), "https://replicate.delivery/start.png")
         self.assertIn("too many redirects", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
 
     def test_empty_location(self):
         plain = rp._plain_session()
@@ -678,6 +679,7 @@ class ReplicateOutputRedirectTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as cm:
                 rp._download(self._auth(), "https://replicate.delivery/x.png")
         self.assertIn("empty Location", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
 
     def test_auth_retry_keeps_token_on_same_host_redirect(self):
         auth = self._auth()
@@ -716,33 +718,26 @@ class ReplicateOutputRedirectTests(unittest.TestCase):
             if "replicate.delivery" in url
             else FakeResp(200, content=b"should-not-use-auth"),
         )
-        plains = []
+        plain = rp._plain_session()
 
-        def new_plain():
-            sess = requests.Session()
+        def handler(url, _kw, _headers):
+            if "replicate.delivery" in url:
+                return FakeResp(401)
+            return FakeResp(200, content=b"img")
 
-            def handler(url, _kw, _headers):
-                if "replicate.delivery" in url:
-                    return FakeResp(401)
-                return FakeResp(200, content=b"img")
-
-            plains.append(_record_gets(sess, handler))
-            return sess
-
-        with mock.patch.object(rp, "_plain_session", side_effect=new_plain):
+        plain_gets = _record_gets(plain, handler)
+        with mock.patch.object(rp, "_plain_session", return_value=plain):
             data = rp._download(auth, "https://replicate.delivery/x.png")
         self.assertEqual(data, b"img")
-        self.assertEqual(len(plains[0]), 1)
-        self.assertIn("replicate.delivery", plains[0][0]["url"])
+        self.assertIn("replicate.delivery", plain_gets[0]["url"])
         self.assertNotIn(
-            "authorization", {k.lower() for k in plains[0][0]["headers"]}
+            "authorization", {k.lower() for k in plain_gets[0]["headers"]}
         )
-        self.assertEqual(len(plains[1]), 1)
-        self.assertIn("api.replicate.com", plains[1][0]["url"])
+        self.assertIn("api.replicate.com", plain_gets[1]["url"])
         self.assertNotIn(
-            "authorization", {k.lower() for k in plains[1][0]["headers"]}
+            "authorization", {k.lower() for k in plain_gets[1]["headers"]}
         )
-        self.assertEqual(plains[1][0]["allow_redirects"], False)
+        self.assertEqual(plain_gets[1]["allow_redirects"], False)
         auth_delivery = [g for g in auth_gets if "replicate.delivery" in g["url"]]
         self.assertEqual(len(auth_delivery), 1)
         self.assertEqual(
@@ -1016,6 +1011,7 @@ class FalDownloadTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as cm:
                 fp._download_output("https://v3b.fal.media/start.png")
         self.assertIn("too many redirects", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
 
     def test_empty_location(self):
         with mock.patch.object(
@@ -1024,6 +1020,7 @@ class FalDownloadTests(unittest.TestCase):
             with self.assertRaises(ProviderError) as cm:
                 fp._download_output("https://v3b.fal.media/files/b/x/out.png")
         self.assertIn("empty Location", str(cm.exception))
+        self.assertIs(cm.exception.billed, True)
 
 
 class CliEstimateTests(unittest.TestCase):

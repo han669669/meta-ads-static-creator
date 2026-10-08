@@ -9,12 +9,12 @@ Schema: https://fal.ai/models/openai/gpt-image-2.5/sunburst/edit/api
 """
 from __future__ import annotations
 
-from typing import Optional
-from urllib.parse import urljoin, urlparse
+from typing import NoReturn, Optional
 
 import requests
 
 from . import Plan, PlateRequest, PlateResult, ProviderError, QUALITIES
+from ._output import fetch_output
 
 NAME = "fal"
 ENV_KEY = "FAL_KEY"
@@ -25,8 +25,6 @@ DEFAULT_MODEL = EDIT_MODEL
 # Output CDN: v3b.fal.media (documented URL form), v3.fal.media / fal.media
 # (SDK upload fallbacks), and fal.run app hosts. Subdomains of each are allowed.
 OUTPUT_HOSTS = ("fal.media", "fal.run")
-MAX_REDIRECTS = 5
-_REDIRECT = frozenset({301, 302, 303, 307, 308})
 
 SIZE = {
     "1:1": (1024, 1024),
@@ -76,42 +74,22 @@ def plan(req: PlateRequest) -> Plan:
     )
 
 
-def _output_host_allowed(host: str) -> bool:
-    host = (host or "").lower()
-    return any(host == d or host.endswith("." + d) for d in OUTPUT_HOSTS)
-
-
-def _output_url_ok(url: str) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme != "https":
-        raise ProviderError(
-            f"refusing to download output from non-HTTPS URL ({parsed.scheme})"
-        )
-    host = parsed.hostname or ""
-    if not _output_host_allowed(host):
-        raise ProviderError(f"refusing to download output from unexpected host {host}")
-
-
-def _redirect_target(current: str, response: requests.Response) -> str:
-    loc = (response.headers.get("Location") or "").strip()
-    if not loc:
-        raise ProviderError("refusing redirect with empty Location")
-    return urljoin(current, loc)
+def _output_fail(message: str) -> NoReturn:
+    # fal_client.run has already succeeded when we download, so a broken
+    # redirect or refused host is billed — same as "no image returned".
+    raise ProviderError(message, billed=True)
 
 
 def _download_output(url: str) -> bytes:
-    current = url
-    for _ in range(MAX_REDIRECTS + 1):
-        _output_url_ok(current)
-        r = requests.get(current, timeout=120, allow_redirects=False)
-        if r.status_code in _REDIRECT:
-            current = _redirect_target(current, r)
-            continue
-        r.raise_for_status()
-        return r.content
-    raise ProviderError(
-        f"too many redirects while downloading output (>{MAX_REDIRECTS})"
+    def get(u: str, *, credentials: bool) -> requests.Response:
+        # Output CDN GETs never send FAL_KEY; credentials stays unused by design.
+        return requests.get(u, timeout=120, allow_redirects=False)
+
+    _url, r = fetch_output(
+        url, get=get, allowed=OUTPUT_HOSTS, fail=_output_fail
     )
+    r.raise_for_status()
+    return r.content
 
 
 def generate(
