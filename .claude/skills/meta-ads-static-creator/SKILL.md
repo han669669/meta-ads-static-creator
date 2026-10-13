@@ -21,6 +21,14 @@ metadata:
 
 Created by Joey Mulcahy — https://joeymulcahy.com/. Published here without his permission.
 
+## Summary
+
+- This skill makes static ads in the format of a reference ad. The ads use your products, your offers, and your copy.
+- You give a brand system from `/brand` and a reference ad.
+- You get a clean photographic plate with no text, plus text layers and UI layers that you can change. The skill makes each ad in 4:5 feed format and in 9:16 full-screen format.
+- An image key is necessary. Use a Replicate token (`REPLICATE_API_TOKEN`) or a fal.ai key (`FAL_KEY`). You approve each paid image call before it starts.
+- Open Design is not necessary. You can use the Open Design app to change the HTML layers.
+
 Build an ad from two independent parts: a text-free photographic plate and an
 editable layout. Use this skill when the copy needs to be localised, tested or
 edited after delivery. Create its declared inbox and output folders before use.
